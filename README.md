@@ -720,3 +720,52 @@ Unit testing a complicated section of code that generates a large numerical outp
 If your code might be subject to numerical rounding issues due to subtle changes, you are better off with a large output that can be used for a before-and-after comparison. One cause of rounding errors is the difference in floating-point precision between CPU registers and main memory. Running your code through a different code path can cause subtle rounding errors that might later confound you - it is better to be aware of this as soon as they occur.
 
 Obviously, it makes sense to use a source code control tool while you are profiling and optimizing. Branching is cheap, and it will preserve your sanity.
+
+## 3. List and Tuples
+
+```>```
+
+## Introduction
+
+Lists and tuple are a class of data structures called ```arrays```. An array is a flat list of data with some intrinsic ordering. Usually in these srots of data structures, the relative ordering of the elements is as important as the elements themslevs. In addition, this a *priori* knowledge of the ordering is incredibly valuable: by konwing that data in our array is at a specific position, we can retrieve it on O(1)! There are also many ways to implement arrays, and each solution has its own useful features and guarantees. This is why in Python we have two types of arrays: lists and tuples. *Lists* are dynamic arrays that let us modify and resize the data we are storing, while *tuples* are static arrays whose contents are fixed and immutable.
+
+Let's unapck these previous statements a bit. System memory on a computer can be thought of as a series of numbered buckets, each capable of holding a number. Python stores data in these bukcets *by reference*, which means the number itself simply points to, or refers to, the data we actually care about. As a result, these buckets can store any type of data we want (as opposed to *numpy* arrays, which have static type and can store only that type of data).
+
+When we want to create an array (and thus a list or utple), we first have to allocate block of system memory (where every section of this block will be used as an integer-sized pointer to actual data). his involves going to the system kernle and requesting the use of ```N``` *consecutive* blocks. The following figure shows an example of the system meory layout for an array (in this case, a list) of size 6:
+
+![Memory Layout Example](ScreenshotsForNotes/Chapter3/memory_example.PNG)
+
+In order to look up any specific element in our list, we simply need to know which element we want and remember which bucket our data strated in. Since all of the data will occupy the same amount of space (one "bucket", or, more specifically, one integer-sized pointer to the actual data), we don't need to know naything about the type of data that is being stored to do this calculation.
+
+If, for example, we needed to retreive the zeroth element in our array, we woul simply go to the first bucket in our sequence, ```M```, and read out the value inside it. If,on hte other hand, we needed the fifth element in our array, we would go to the bucket at position ```M+5``` and read its content. In general, if we want to retrieve element ```i``` from our array, we go to bucket ```M+i```. So, by ahving our data stored in consecutive buckets, and having knowledge of the ordering of our data, we can lcoate our data by knowing which bucket to look at in one step (or ```O(1)```), regardless of how big our array is.
+
+## Tuples as static arrays
+
+Tuples are fixed and immutable. This means that once a tuple is created, unilke a list, it cannot be modified or resized:
+
+```Python
+>>> t = (1, 2, 3, 4)
+>>> t[0] = 5
+
+...
+TypeError: 'tuple' object does not support item assignment
+```
+
+However, although they don't support resizing, we can concatenate two tuples together and form a new tuple. The operation is similar to the ```resize``` operation on lists, but we do not allocat any extra space for the resulting tuple:
+
+```Python
+>>> t1 = (1, 2, 3, 4)
+>>> t2 = (5, 6, 7, 8)
+>>> t1 + t2
+(1, 2, 3, 4, 5, 6, 7, 8)
+```
+
+If we consider this to be compraable to the ```append``` operation on lists, we see that it performs in ```O(n)``` as opposed to the ```O(1)``` speed o lists. This is because we must allocate and copy the tuple every time something is added to it, as opposed to only when our extra headroom ran out for lists. As a result of this, there is no in-place ```append```-like operation; adding two tuples always returns a new tuple that is in a new location in memory.
+
+Not storing the extra headroom for resizing has the advantage of using fewer reousrces. A list of size 100000000 craeted with any ```append``` operation actually uses 112500007 elements' writh of memory, while a tuple holding the same data will only ever use exactly 100000000 elements' worth of memory. This makes tuple lightweight and preferable when data becomes static.
+
+Furthermore, even if we create a list *without* ```append``` (and thus we don't have the extra headroom introduced by an ```append``` operation), it will *still* be larger in memory than a tuple with the same data. This is because lists have to keep track of more informatino about their current state in order to efficiently resize. Whiel thie extra informatino is quite small (the quievalent of one extra element), it can add up if several million lists are in use.
+
+Another benefit of the static nature of tuple is something Python does in the backgorund: resource caching. Python is garbage collected, which means that when a variable isn't used anymore, Python frees the memory used by that variable, giving it back to the operatin system for use in other applications (or for other variables). For tuples of sizes 1-20, however, when they are no longer in use, the space isn't immediately given back to the ystem: up to 20000 of each size are saved for future use. This means that when a new tuple of that size is needed in the future, we don't need to communicate with the operation system to find a region in memory to put the data into, since we ahve a reserve of free memory already. However, this also means that the Python process will have some extra memory overhead.
+
+While this may seem like a small benefit, it is one of the fantastic things about tuples: tehy can be created easily and quickly since they can avoid communications with the operation system, which can cost your program quite a bit of time.
