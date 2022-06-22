@@ -151,3 +151,540 @@ Whenver your code becomes too long - such as functions logner than one screen - 
 **Remember that automation if your friend.** Doing less manual work means there's less chance of errors creeping in. Automated build systems, continuous integrationg with automated test suite runners, and automated deployment systems turn tedious and error-prone tasks into standard processes that anyone can run and support.
 
 Finally, remmeber that ***readability is far mroe improtant than being clever.*** Short sinppets of complex and hard-to-read code will be hard for you and your colleagues to maintain, so people will be scared of touching this code. Instead, write a longer, easier-to-read function and back it with useful documentation showing that it'll returng, and complement this with tests to confirm that it *does* work as you expect.
+
+# 2. Profiling to Find Bottlenecks
+
+## What is profiling
+
+***Profiling lets us find bottlenecks so we can do the least amount of work to get the biggest practical performance gain.***
+
+Any measurable resource can be profiled, not just the CPU. You can apply profiling techniques to network bandwidth and disk I/O as well.
+
+If a program is running slowly because it's using too much RAM then you should identify the part of the program that does that and modify it. You can also skip profiling at this point and change whatever it is that you *believe* is wrong with the code. The problem with using your intuition is that you'll often end up fixing the wrong thing. **Rather than using your intuition, it is far better to first profile, having defined a hypothesis, before making changes to the structure of your code.**
+
+```-> >```
+
+## Profiling efficiently
+
+The first aim of profiling is to **test a representative system to identify what's slow** (or using too much RAM, or causing too much disk I/O or network I/O). Profiling typically adds an overhead (10x to 100x slowdowns can be typical), and you still want your code to be used in as similar to a real-world situation as possible. Extract a test case and isolate the piece of the system that you need to test. Preferably, it'll have been written to be in its own set of modules already.
+
+Whatever approach you take to profiling your code, you must remember to have adequate unit test coverage in your code. Unit tests help you to avoid silly mistakes and to keep your results reproducible. Avoid them at your peril.
+
+*Always* profile your code before compiling or rewriting your algorithms. You need evidence to determine the most efficient ways to make your code run faster.
+
+## Introducing the Julia Set
+
+The Julia set is a fractal sequence that generates a complex output image.
+
+We will analyze a block of code that produces both a false grayscale plot and a pure grayscale variant of the Julia set, at the complex point ```c=-0.62772 -0.42193j```. A Julia set is produced by calculating each pixel in isolation.
+
+The following figure is a Julia set plot with a false gray scale to highlight detail:
+
+![Julia set plot with a false gray scale to highlight detail](ScreenshotsForNotes/Chapter2/JuliaSetPlotWithAFalseGrayScaleToHighlightDetail.PNG)
+
+If we chose a different ```c```, we'd get a different image. The location we have chosen has regions that are quick to calculate and other that are slow to calculate; this is useful for our analysis.
+
+The problem is interesting because we calculate each pixel by applying a loop that could be applied an indeterminate number of times. On each iteration we test to see if this coordinate's value escapes toward infinity, or if it seems t be held by an attractor. Coordinates that cause few iterations are colored darkly in the figure above, and those that cause a high number of iterations are colored white. White regions are more complex to calculate and so take longer to generate.
+
+We define a set of ```z``` coordinates that we'll test. The function that we calculate squares the complex number z and adds c: ```f(z) = z^2 + c```.
+
+We iterate on this function while testing to see if the escape condition holds using ```abs```. If the escape function is ```False```, we break out of the loop adn record the number of iterations we performed at this coordinate. If the escape function is never ```False```, we stop after ```maxiter``` iterations. We will later turn this ```z```'s result into a colored pixel representing this complex location.
+
+In pseudocode, it might look like this:
+
+```
+for z in coordinates:
+  for iteration in range(maxiter):  # limited iterations per point
+    if abs(z) < 2.0:  # has the escape condition been broken?
+      z = z*z + c
+    else:
+      break
+  
+  # store the iteration count for each z and draw later
+```
+
+To explain this function, let's try two coordinates.
+
+We'll use the coordinate that we draw in the top-left corner of the plot at ```-1.8-1.8j```. We must test ```abs(z)``` < 2 before we can try to update rule:
+
+```python
+z = -1.8-1.8j
+print(abs(z))
+
+"""
+Output:
+
+z = -1.8-1.8j
+print(abs(z))
+"""
+```
+
+We can see that for the top-left coordinate, the ```abs(z)``` test will be ```False``` on the zeroth iteration as ```2.54 >= 2.0```, so we do not perform the update rule. The ```output``` value for this coordinate is ```0```.
+
+Now let's jump to the center of the plot at ```z = 0 + 0j``` and try a few iterations:
+
+```python
+c = -0.62772-0.42193j
+z = 0+0j
+for n in range(9):
+    z = z*z + c
+    print(f"{n}: z={z:.5f}, abs(z)={abs(z):0.3f}, c={c:.5f}")
+
+"""
+Output:
+
+0: z=-0.62772-0.42193j, abs(z)=0.756, c=-0.62772-0.42193j
+1: z=-0.41171+0.10778j, abs(z)=0.426, c=-0.62772-0.42193j
+2: z=-0.46983-0.51068j, abs(z)=0.694, c=-0.62772-0.42193j
+3: z=-0.66777+0.05793j, abs(z)=0.670, c=-0.62772-0.42193j
+4: z=-0.18516-0.49930j, abs(z)=0.533, c=-0.62772-0.42193j
+5: z=-0.84274-0.23703j, abs(z)=0.875, c=-0.62772-0.42193j
+6: z=0.02630-0.02242j, abs(z)=0.035, c=-0.62772-0.42193j
+7: z=-0.62753-0.42311j, abs(z)=0.757, c=-0.62772-0.42193j
+8: z=-0.41295+0.10910j, abs(z)=0.427, c=-0.62772-0.42193j
+"""
+```
+
+We can see that each update to ```z``` for these first iterations leaves it with a value where ```abs(z) < 2``` is ```True```. For this coordinate we can iterate 300 times, and still the test will be ```True```. We cannot tell how many iterations we must perform before the condition becomes ```False```, and this may be an infinite sequence. The maximum iteration (```maxiter```) break clause will stop us from iteration potentially forever.
+
+In the following figure, we see the first 50 iterations of the preceding sequence. For ```0+0j``` (the solid line with circle markers), the sequence appears to repeat every eighth iteration, but each sequence of seven calculations has a mnior deviation from the previous sequence - we can't tell if this point will iterate forever within the boundary condition, or for a long time, or maybe for just a few more iterations. The dashed ```cutoff``` line shows the boundary at +2:
+
+![Two coordinate examples evolving for the Julia set](ScreenshotsForNotes/Chapter2/TwoCoordinateExamplesEvolvingForTheJuliaSet.PNG)
+
+For ```-0.82+0j``` (the dashed line with diamond markers), we can see that after the ninth update, the absolute result has exceeded the +2 cutoff, so we stop updating this value.
+
+## Calculating the Full Julia Set
+
+At the start of our module we import the ```time``` module for our first profiling approach and define some coordainte constants.
+
+```python
+"""Julia set generator without optional PIL-based image drawing"""
+import time
+
+# area of complex space to investigate
+x1, x2, y1, y2 = -1.8, 1.8, -1.8, 1.8
+c_real, c_imag = -0.62772, -.42193
+```
+
+To generate the plot, we create two lists of input data. The first is ```zs``` (complex ```z``` coordinates), and the second is ```cs``` (a complex initial condition). Neither list varies, adn we could optimize ```cs``` to a single ```c``` value as a constant. The rationale for building two input lists is so that we have some reasonable-looking data to profile when we profile RAM  usage later in this chapter.
+
+To build the ```zs``` and ```cs``` lists, we need to know the coordinates for each ```z```. In the following example, we build up these coordinate using ```xcoord``` and ```ycoord``` and a specified ```x_step``` and ```y_step```. The somewhat verbose nature of this setup is useful when porting the code to other tools (such as ```numpy```) and to other Python environments, as it helps to have everything *very* clearly defined for debugging:
+
+```python
+def calc_pure_python(desired_width, max_iterations):
+  """Create a list of complex coordinates (zs) and complex parameters (cs), build Julia set"""
+  x_step = (x2 - x1) / desired_width
+  y_step = (y1 - y2) / desired_width
+
+  x = []
+  y = []
+
+  ycoord = y2
+  while ycoord > y1:
+    y.append(ycoord)
+    ycoord += y_step
+
+  xcoord = x1
+  while xcoord < x2:
+    x.append(xcoord)
+    xcoord += x_step
+
+  # build a list of coordinates and the initial condition for each cell
+  # Note that ur initial condition is a constant and could easily be removed,
+  # we use it to simulate a real-world scenario with several inputs to our
+  # function
+
+  zs = []
+  cs = []
+  for ycoord in y:
+    for xcoord in x:
+      zs.append(complex(xcoord, ycoord))
+      cs.append(complex(c_real, c_imag))
+
+      print("Length of x:", len(x))
+      print("Total elements:", len(zs))
+      start_time = time.time()
+      output = calculate_z_serial_purepython(max_iterations, zs, cs)
+      end_time = time.time()
+      secs = end_time - start_time
+      print("{0} took {1} seconds".format(calculate_z_serial_purepython.__name__, secs))
+
+      # This sum is expected for a 1000^2 grid with 300 iterations
+      # It ensures that our code evolves exactly as we'd intended
+      assert sum(output) == 33219980
+```
+
+Having built the ```zs``` and ```cs``` lists, we output some information about the size of hte lists and calculate the ```output``` list via ```calculate_z_serial_purepython```. Finally, we ```sum``` the contents of ```output``` and ```assert``` that it matches the expected output value.
+
+As the code is deterministic, we can verify that the function works as we expect by summing all the calculated values. This is useful as a sanity check - when we make changes to numerical code, it is *very* sensible to check that we haven't broken the algorithms. Ideally, we could use unit tests and test more than one configuration of the problem.
+
+Next, in the following example, we define the ```calculate_z_serial_purepython``` function, which expands on the algorithm we discussed earlier. Notably, we also define an ```output``` list at the start that has the same length as the input ```zs``` and ```cs``` lists:
+
+```python
+def calculate_z_serial_purepython(maxiter, zs, cs):
+  """Calculate output list using Julia update rule"""
+  output = [0] * len(zs)
+  for i in range(len(zs)):
+    n = 0
+    z = zs[i]
+    c = cs[i]
+
+    while abs(z) < 2 and n < maxiter:
+      z = z * z + c
+      n += 1
+
+    output[i] = n
+
+  return output
+```
+
+Now we call the calculation routine in the next example. By wrapping it an a ```__main__``` check, we can safely import the module without starting the calculations for some of the profiling methods. Here, we're not showing the method used to plot the output:
+    
+```python
+if __name__ == '__main__':
+  # Calculate the Julia set using a pure Python solution with
+  # reasonable defaults for a laptop
+  calc_pure_python(desired_width=1000, max_iterations=300)
+
+"""
+Output:
+
+Length of x: 1000
+Total elements: 7172
+calculate_z_serial_purepython took 0.015624761581420898 seconds
+"""
+```
+
+In the false-grayscale plot, the high-contrast color changes gave us an idea of where the cost of the function was slow changing or fast changing. Here, in the following figure, we have a linear color map: black is quick to calculate, and white is expensive to calculate.
+
+By showing two representations of the same data, we can see that lots of detail is lost in the linear mapping. Sometimes it can be useful to have various representations in mind when investigating the cost of a function:
+
+![Julia plot example using a pure gray scale](ScreenshotsForNotes/Chapter2/JuliaPlotExampleUsingAPureGrayScale.PNG)
+
+## Simple Approaches to Timing - print and a Decorator
+
+You must observe the normal variation when you're timing your code, you might incorrectly attribute an improvement in your code to what is simply a random variation in execution time.
+
+Your computer will be performing other tasks while running your code, such as accessing the network, disk, or RAM, and these factors can cause variations in the execution time of your program.
+
+Using ```print``` statements is the simplest way to measure the execution time of a piece of code *inside* a function. It is a basic approach, but despite being quick and dirty, it can be very useful when you're first looking at a piece of code.
+
+Using ```print``` statements is commonplace when debugging and profiling code. It quickly become unmanageable but is useful for short investigations. Try to tidy up the ```print``` statements when you're done with them, or they will clutter your ```stdout```.
+
+A slightly cleaner approach is to use a *decorator*:
+
+```python
+from functools import wraps
+
+def timefn(fn):
+  @wraps(fn)
+  def measure_time(*args, **kwargs):
+    t1 = time.time()
+    result = fn(*args, **kwargs)
+    t2 = time.time()
+    print(f"@timefn: {fn.__name__} took {t2 - t1} seconds")
+    return result
+
+  return measure_time
+
+
+@timefn
+def calc_pure_python(desired_width, max_iterations):
+    ...
+```
+
+> The addition of profiling information will inevitably slow down your code - some profiling options are very informative and induce a heavy speed penalty. The trade-off between profiling detail and speed will be something you have to consider.
+
+We can use the ```timeit``` module as another way to get a coarse measurement of the execution speed of our CPU-bound function.
+
+> The ```timeit``` module temporarily disabled the garbage collector. This might impact the speed you'll see with real-world operations if the garbage collector would normally be invoked by your operations.
+
+From the command line, you can run ```timeit``` as follows:
+
+```bash
+$ python -m timeit -n 5 -r 1 -s "import julia" \
+  "julia1.calc_pure_python(desired_width=1000, max_iterations=300)"
+```
+
+```n``` is the number of loops and ```-r``` is the number of repetitions. The best result of all repetitions is given as the answer.
+
+## Using the cProfile Module
+
+```cProfile``` is a built-in profiling tool in the standard library. It hooks into the virtual machine in CPython to measure the time taken to run every function that it sees. This introduces a greater overhead, but you get correspondingly more information. Sometimes the additional information can lead to surprising insights into your code.
+
+```cProfile``` is one of two profilers in the standard library, alongside ```profile.profile``` is the original and slower pure Python profiler; ```cPorfile``` ahs teh same interface as ```profile``` and is written in ```C``` for a lower overhead.
+
+***A good practice when profiling is to generate a hypothesis about the speed of parts of your code before you profile it. Forming a hypothesis ahead of time means you can measure how wrong you are (and you will be!) and improve your intuition about certain coding styles.***
+
+> You should never avoid profiling in favor of a gut instinct. It is definetly worth forming a hypothesis ahead of profiling to help you learn to sport possible slow choices in your code, and you should always back up your choices with evidence
+
+Always be driven by results that you have measured, and always start with some quick-and-dirty profiling to make sure you're addressing the right area.
+
+Let's hypothesize that ```calculate_z_serial_purepython``` is the slowest part of the code. In that function, we do a lot of dereferencing and make many calls to basic arithmetic operators and the ```abs``` function. These will probably show up as consumers of CPU resources.
+
+Here, we'll use the ```cProfile``` module to run a variant of the code. The output is spartan but helps us figure out where to analyze further.
+
+The ```-s cumulative```  flag tells ```cProfile``` to sort by cumulative time spent inside each function; this gives us a view into the slowest parts of a section of code. The ```cProfile``` output is written to screen directly after our unusual ```print``` results:
+
+```bash
+$ python -m cProfile -s cumulative julia.py
+
+Length of x: 1000
+Total elements: 1
+calculate_z_serial_purepython took 1.1444091796875e-05 seconds
+         2037 function calls in 0.000 seconds
+
+   Ordered by: cumulative time
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.000    0.000    0.000    0.000 {built-in method builtins.exec}
+        1    0.000    0.000    0.000    0.000 julia.py:1(<module>)
+        1    0.000    0.000    0.000    0.000 julia.py:11(measure_time)
+        1    0.000    0.000    0.000    0.000 julia.py:21(calc_pure_python)
+        3    0.000    0.000    0.000    0.000 {built-in method builtins.print}
+     2002    0.000    0.000    0.000    0.000 {method 'append' of 'list' objects}
+        1    0.000    0.000    0.000    0.000 {method 'format' of 'str' objects}
+        1    0.000    0.000    0.000    0.000 julia.py:10(timefn)
+        1    0.000    0.000    0.000    0.000 julia.py:65(calculate_z_serial_purepython)
+        1    0.000    0.000    0.000    0.000 functools.py:34(update_wrapper)
+        1    0.000    0.000    0.000    0.000 {built-in method builtins.abs}
+        1    0.000    0.000    0.000    0.000 functools.py:64(wraps)
+        7    0.000    0.000    0.000    0.000 {built-in method builtins.getattr}
+        5    0.000    0.000    0.000    0.000 {built-in method builtins.setattr}
+        3    0.000    0.000    0.000    0.000 {built-in method time.time}
+        1    0.000    0.000    0.000    0.000 {method 'update' of 'dict' objects}
+        4    0.000    0.000    0.000    0.000 {built-in method builtins.len}
+        1    0.000    0.000    0.000    0.000 {built-in method builtins.sum}
+        1    0.000    0.000    0.000    0.000 {method 'disable' of '_lsprof.Profiler' objects}
+```
+
+Sorting by cumulative time gives us an idea about where the majority of execution time is spent. This result shows us that 36.221.995 function calls occurred in just over 12 seconds (this time includes hte overhead of using ```cProfile```). Previously, our code took around 8 seconds to execute - we've just added a 4-second penalty by measuring how long each function takes to execute.
+
+We can see that the entry point to the code ```julia.py``` on line 1 takes a total of 12 seconds. This is just the ```__main__``` call to ```calc_pure_python```. ```ncalls``` is 1, indicating that this line is executed only once.
+
+Inside ```calc_pure_python```, the call to ```calculate_z_serial_purepython``` consumes 11 seconds. Both functions are called only once. We can drive that approximately 1 second is spent on lines of code inside ```calc_pure_python```, separate to calling the CPU-intensive ```calculate_z_serial_purepython``` function. However, we can't derive *which* lines take the time inside the function using ```cProfile```.
+
+Inside ```calculate_z_serial_purepython```, the time spent on lines of code (without calling other functions) is 8 seconds. This function makes 34.219.980 calls to ```abs```, which take a total of 3 seconds, along with other calls that od not cost much time.
+
+What about the ```{abs}``` call? This line is measuring the individual calls to the ```abs``` function inside ```calculate_z_serial_purepython```. While the per-call cost is negligible (it is recorded as 0.000 seconds), the total for ```34.219.980``` calls in 3 seconds. We couldn't predict in advance exactly how many calls would be made to ```abs```, as the Julia function has unpredictable dynamics.
+
+At best we could have said that it will be called a minimum of 1 million times, as we're calculating 1000*1000 pixels. At most it will be called 300 million times, as we calculate 1000000 pixels with a maximum of 300 iterations. So 34 million calls is roughly 10% of the worst case.
+
+If we look at the original grayscale image and, in our mind's eye, squash the white parts together and into a corner, we can estimate that the expensive white region accounts for roughly 10% of the rest of the image.
+
+The next line in the profiled output ```{method 'append' of 'list objects{```, details the creation of 2002000 list items.
+
+The creation of 2002000 items is occuring in ```calc_pure_python``` during the setup phase.
+
+The ```zs``` and ```cs``` lists will be 1000*1000 items each, and these are built from a list of 1000 x and 1000 y coordinates. In total, this is 2002000 calls to append.
+
+It is important to note that this ```cProfile``` output is not ordered by parent functions; it is summarizing the expense of all functions in the executed block of code. Figuring out what is happening on a line-by-line basis is very hard with ```cProfile```, as we get profile information only for hte function calls themselves, not for each line within the function.
+
+Inside ```calculate_z_serial_purepython```, we can account for ```{abs}```, and in total this function costs approximately 3.1 seconds. We know that ```calculate_z_serial_purepython``` costs 11.4 seconds in total
+
+The final line of the profiling output refers to ```lsprof```; this is the original name of the tool that evolved into ```cProfile``` and can be ignored.
+
+To get more control over the result of ```cProfile```, we can write a statistic file and then anaylzie it in Python:
+
+```bash
+$ python -m cProfile -o profile.stats julia.py
+```
+
+## Visualizing cProfile Output with SnakeViz
+
+```snakeviz``` is a visualizer that draws the output of ```cProfile``` as a diagram in which large boxes are areas of code that take longer to run. It replaces the older ```runsnake``` tool.
+
+Use ```snakeviz``` to get a high-level understanding of a ```cProfile``` statistics file, particularly if you're investigating a new project for which you have little intuition. The diagram will help you visualize the CPU-usage behavior of the system , and it may highlight areas that you hadn't expected to be expensive.
+
+To install SnakeViz, use ```$ pip install snakeviz```.
+
+## Using line_profiler for Line-by-Line Measurements
+
+Robert Kern's line_profiler works by profiling individual functions on a line-by-line basis, so you should start with ```cProfile``` and use the high-level view to guid which functions to profile with ```line_profiler```.
+
+It is worthwhile printing and annotating version of the output from this tool as you modify your code, so you have a record of changes (successful or not) that you can quickly refer to. Don't rely on your memory when you're working on line-by-line changes.
+
+To install ```line_profiler```, issue the command ```pip install line_profiler```.
+
+A decorator (```@profile```) is used to mark the chosen function. The ```kernprof``` script is used to execute your code, and the CPU time and other statistics for each line of the chosen function are recorded.
+
+The arguments are ```-l``` for line-by-line (rather tha function-level) profiling and ```-v``` for verbose output. Without ```-v```, you receive an ```.lprof``` output that you can later analyze with the ```line_profiler``` module.
+
+```bash
+$ kernprof -l -v julia_lineprofiler.py
+```
+
+![Line profiling](ScreenshotsForNotes/Chapter2/julia_lineprofiler_1.PNG)
+
+Introducing ```kernprof.py``` adds a substantial amount to the runtime. In this example, ```calculate_z_serial_purepython``` takes 49 seconds; htis is up from 8 seconds using simple print statements and 12 seconds using ```cProfile```. That gain is that we get a line-by-line breakdown of where the time is spent inside the function.
+
+The ```% Time``` column is the most helpful - we can see that 38% of the time is spent on the ```while``` testing. We don't know whether the first statement ```abs(z) < 2``` is more expensive than the second ```n < maxiter```, though. Inside the loop, we see that the update to ```z``` is also fairly expensive. Even ```n += 1``` is expensive! Python's dynamic lookup machinery is at work for every loop, even though we're using the same types for each variable in each loop - this is where compiling and type specialization gives us a massive win. The creation of th ```output``` list and the updated on line 20 are relatively cheap compared to the cost of the ```while``` loop.
+
+If you haven't thought about the complexity of Python's dynamic machinery before, do think about what happens in that ```n += 1``` operation. Python has to check that the ```n``` object has an ```__add__``` function (and if it didn't, it'd walk up any inherited classes to see if they provided this functionality), and then the other object (1 in this case) is passed in so that the ```__add__``` function can decide how to handle the operation. Remember that the second argument might be a ```float``` or other object that may or may not be compatible. This all happens dynamically.
+
+The obvious way to further analyze the ```while``` statement is to break it up. While there has been some discussion in the Python community around the idea of rewriting the ```.pyc``` files with more detailed information for multipart, single-line statements, we are unaware of any production tools that offer a more fine-grained analysis than ```line_profiler```.
+
+In the following example, we break the ```while``` logic into several statements. This additional complexity will increase the runtime of the function, as we ahve more lines of code to execute, but it *might* also help us understand the costs incurred in this part of the code.
+
+![Julia Line Profiler 2](ScreenshotsForNotes/Chapter2/julia_lineprofiler_2.PNG)
+
+This version takes 82 seconds to execute, while the previous version took 49 seconds. Other factors *did* complicate the analysis. In this case, having extra statements that have to be executed 34219980 times each slows down the code. If we hadn't used ```kernprof.py``` to investigate the line-by-line effect of this change, we might have drawn other conclusions about the reason for the slowdown, as we'd have lacked the necessary evidence.
+
+From this simple analysis, it looks as though the logic test of ```n``` is more than two times faster than the call to ```abs```. Since the order of evaluation for Python statements is both left to right and opportunistic, it makes sense to put the cheapest test on the left side of the equation. On 1 in every 301 tests for each coordinate, the ```n < maxiter``` test will be ```False```, so Python wouldn't need to evaluate the other side of the ```and``` operator.
+
+We never know whether ```abs(z) < 2``` will be ```False``` until we evaluate it, and our earlier observations for this region of the complex plane suggest it is ```True``` around 10% of the time for all 300 iterations. If we wanted to have a strong understanding of the time complexity of this part of the code, it would make sense to continue the numerical analysis. In this sitatuion, however, we want an easy check to see if we can get a quick win.
+
+We can form a new hypothesis stating, "By swapping the order of the operators in the ```while``` statement, we will achieve a reliable speedup." We *can* test this hypothesis using ```kernprof```, but the additional overhead of profiling this way might add too much noise. Instead, we can use an earlier version of the code, running a test comparing ```while abs(z) < 2``` and ```n < maxiter```: against ```while n < maxiter``` and ```abs(z) < 2```.
+
+Running the two variants *outside* of ```line_profiler``` means they run at similar speeds. The overheads of ```line_profiler``` also confuse the result, and the results on line 17 for both version are similar. We should reject the hypothesis that in Python 3.7 changing the order of the logic results in a consistent speedup - there's no clear evidence for this.
+
+Using a more suitable approach to solve this problem would yield greater gains.
+
+We can be confident in our result because of the following:
+
+* We stated a hypothesis that was easy to test.
+* We changed our code so that only the hypothesis would be tested (never test two things at once!)
+* We gathered enough evidence to support our conclusion.
+
+## Using memory_profiler to Diagnose Memory Usage
+
+Just a Robert Kern's ```line_profiler``` package measure CPU usage, the ```memory_profiler``` module by Fabian Pedregosa and Philippe Gervais measures memory usage on a line-by-line basis. Understanding the memory usage characteristics of your code allows you to ask yourself two questions:
+
+* Could we use *less* RAM by rewriting this function to work more efficiently?
+* Could we use *more* RAM and save CPU cycles by caching?
+
+```memory_profiler``` operates in a very similar way to ```line_profiler``` but runs far more slowly. If you install the ```psutil``` package (optional but recommended), ```memory_profiler``` will run faster. Memory profiling may easily make your code run 10 to 100 times slower. In practice, you will probably use ```memory_profiler``` occasionally and ```line_profiler``` (for CPU profiling) more frequently.
+
+Install ```memory_profiler``` with the command ```pip install memory_profiler``` (and optionally with ```pip install psutil```).
+
+As mentioned, the implementation of ```memory_profiler``` iis not as performant as the implementation of ```line_profiler```. It may therefore make sense to run your tests on a smaller problem that completes in a useful amount of time. Overnight runs might be sensible for validation, but you need quick and reasonable iterations to diagnose problems and hypothesize solutions.
+
+When dealing with memory allocation, you must be aware that the situation is not as clear-cut as it is with CPU usage. Generally, it is more efficient to overallocate memory in a process that can be used at leisure, as memory allocation operations are relatively expensive. Furthermore, garbage collection is not instantaneous, so object may be unavailable but still in the garbage collection pool for some time.
+
+The outcome of this is that it is hard to really understand what is happening with memory usage and release inside a Python program, as a line of code may not allocate a deterministic amount of memory *as observed from outside the process*. Observing the gross trend over a set of lines is likely to lead to better insight than would be gained by observing the behavior of just one line.
+
+![Memory Profiler 1](ScreenshotsForNotes/Chapter2/julia_memoryprofiler_1.PNG)
+![Memory Profiler 2](ScreenshotsForNotes/Chapter2/julia_memoryprofiler_2.PNG)
+
+Another way to visualize the change in memory use is to sample over time and plot the result. ```memory_profiler``` has a utility called ```mprof```, used once to sample the memory usage and a second time to visualize the samples. It samples by time and not by line, so it barely impacts the runtime of the code.
+
+The following figure sis created using ```mprof run julia_memoryprofiler.py```. This writes a statistics file that is then visualized using ```mrprof plot```. Our two functions are bracketed: this shows where in time they are entered, and we can see the growth in RAM as they run. Inside ```calculate_z_serial_purepython```, we can see the steady increase in RAM usage throughout the execution of the function; this is caused by all the small objects (```int``` and ```float``` types) that are created.
+
+![Profiler Report Using Mprof](ScreenshotsForNotes/Chapter2/ProfilerReportUsingMprof.PNG)
+
+In addition to observing the behavior at the function level, we can add labels using a context manager. The snippet in the following example is used to generate the graph in the next figure. We can see the ```create_output_list``` label: it appears momentarily at around 1.5 seconds after ```calculate_z_serial_purepython``` and results in the process being allocated more RAM. We then pause for a second; ```time.sleep(1)```` is an artificial addition to make the graph easier to understand.
+
+```python
+@profile
+def calculate_z_serial_purepython(maxiter, zs, cs):
+    """Calculate output list using Julia update rule"""
+    with profile.timestamp("create_output_list"):
+      output = [0] * len(zs)
+    time.sleep(1)
+    with profile.timestamp("calculate_output"):
+        for i in range(len(zs)):
+            n = 0
+            z = zs[i]
+            c = cs[i]
+            while n < maxiter and abs(z) < 2:
+                z = z * z + c
+                n += 1
+            output[i] = n
+    return output
+```
+
+In the ```calculate_output``` block that runs for most of the graph, we see a very slow, linear increase in RAM usage. This will be from all of the temporary numbers used in the inner loops. Using the labels really helps us to understand at a fine-grained level where memory is being consumed. Interestingly, we see the "peak RAM usage" line - a dashed vertical line just before the 10-second mark - occurring before the termination of the program. Potentially this is due to the garbage collector recovering some RAM from the temporary objects used during ```calculate_output```.
+
+What happens if we simplify our code and remove the creation of the ```zs``` and ```cs``` lists? We then have to calculate these coordinates inside ```calculate_z_serial_purepython``` (so the same work is performed), but we'll save RAM by not storing them in lists.
+
+![Profiling Report using Mrpof with Labels](ScreenshotsForNotes/Chapter2/ProfilerReportUsingMprofWithLabels.PNG)
+
+In the next figure, we see a major change in behavior - the overall envelope of RAM usage drops from 140 MB to 60 MB, reducing our RAM usage by half!
+
+![Profiling Report after removing two large lists](ScreenshotsForNotes/Chapter2/ProfilerReportAfterRemovingTwoLargeLists.PNG)
+
+## Introspecting an existing process with PySpy
+
+```py-spy``` is an intriguing new sampling profiler - rather than requiring any code changes, it introspects an already-running Python process and reports in the console with a ```top```-like display. Being a sampling profiler, it has almost no runtime impact on your code. It is written in Rust and requires elevated privileges to introspect another process.
+
+This tool could be very useful in a production environment with long-running processes or complicated installation requirements. It supports Windows, Mac, and Linux. Install it using ```pip install py-spy``````. If your process is already running, you'll want to use ```ps``` to get its process identifier (the PID); then this can be passed into ```py-spy```.
+
+## Bytecode: Under the Hood
+
+### Using the ```dis``` Module to Examine CPython Bytecode
+
+The ```dis``` module lets us inspect the underlying bytecode that we run inside the stack-based CPython virtual machine. Having an understanding of what's happening in the virtual machine that runs your higher-level Python code will help you to understand why some styles of coding are faster than other. It will also help when you come to use a tool like Cython, which steps outside of Python and generates C code.
+
+The ```dis``` module is built in. You can pass it code or a module, and it will print out a disassembly.
+
+### Different approaches, different complexity
+
+There will be various ways to express your ideas using Python. Generally, the most sensible option should be clear, but if your experience is primarily with an older version of Python or another programming language, you may have other methods in mind. Some of these ways of expressing an idea may be slower than others.
+
+You probably care more about readability than speed for most of your code, so your team can code efficiently without being puzzled by performant but opaque code.
+
+Sometimes you will want performance, though (without sacrificing readability). Some speed testing might be what you need.
+
+Take a look at the following two code snippets. Both do the same job, but the first generates a lot of additional Python bytecode, which will cause more overhead.
+
+```python
+def fn_expressive(upper=1_000_000):
+    total = 0
+    for n in range(upper):
+        total += n
+    return total
+
+
+def fn_terse(upper=1_000_000):
+    return sum(range(upper))
+```
+
+Both functions calculate the sum of a range of integers. A simple rule of thumb (but one you *must* back up using profiling!) is that more lines of bytecode will execute more slowly than fewer equivalent lines of bytecode that use built-in functions.
+
+If we use the ```dis``` module to investigate the code for each function, as shown in the following example, we can see that the virtual machine has 17 lines to execute with the more expressive function and only 6 to execute with the very readable but terse second function:
+
+```
+- dis.dis(fn_expressive)
+
+  4           0 LOAD_CONST               1 (0)
+              2 STORE_FAST               1 (total)
+
+  5           4 LOAD_GLOBAL              0 (range)
+              6 LOAD_FAST                0 (upper)
+              8 CALL_FUNCTION            1
+             10 GET_ITER
+        >>   12 FOR_ITER                 6 (to 26)
+             14 STORE_FAST               2 (n)
+
+  6          16 LOAD_FAST                1 (total)
+             18 LOAD_FAST                2 (n)
+             20 INPLACE_ADD
+             22 STORE_FAST               1 (total)
+             24 JUMP_ABSOLUTE            6 (to 12)
+
+  7     >>   26 LOAD_FAST                1 (total)
+             28 RETURN_VALUE
+```
+
+```
+- dis.dis(fn_terse)
+
+ 11           0 LOAD_GLOBAL              0 (sum)
+              2 LOAD_GLOBAL              1 (range)
+              4 LOAD_FAST                0 (upper)
+              6 CALL_FUNCTION            1
+              8 CALL_FUNCTION            1
+             10 RETURN_VALUE
+```
+
+The difference between the two code blocks is striking. Inside ```fn_expressive()```, we maintain two local variables and iterate over a list using a ```for``` statement. The ```for``` loop will be checking to see if a ```StopIteration``` exception has been raised on each loop. Each iteration applies the ```total.__add__``` function, which will check the type of the second variable (```n```) for each iteration. These checks all add a little expense.
+
+Inside ```fn_terse()```, we call out to an optimized C list comprehension function that knows how to generate the final result without creating intermediate Python objects. This is much faster, although each iteration must still check for the types of the objects that are being added together.
+
+As noted previously, you *must* profile your code - if you just rely on this heuristic, you will inevitably write slower code at some point. It is definitely worth learning whether a shorter and still readable way to solve your problem is built into Python. If so, it is more likely to be easily readable by another programmer, and it will *probably* run faster.
+
+### Unit testing during optimization to maintain correctness
+
+Add unit tests to your code for a saner life. You'll be giving your current self and your colleagues faith that your code works, and you'll be giving a present to your future-self who has to maintain this code later. You really will save a lot of time in the long term by adding tests to your code.
+
+In addition to unit testing, you should also strongly consider using ```coverage.py```. It checks to see which lines of code are exercise by your tests and identifies the sections that have no coverage. This quickly lets you figure out whether you're testing the code that you're about to optimize, such that any mistakes that might creep in during the optimization process are quickly caught.
