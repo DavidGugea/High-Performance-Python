@@ -688,3 +688,35 @@ As noted previously, you *must* profile your code - if you just rely on this heu
 Add unit tests to your code for a saner life. You'll be giving your current self and your colleagues faith that your code works, and you'll be giving a present to your future-self who has to maintain this code later. You really will save a lot of time in the long term by adding tests to your code.
 
 In addition to unit testing, you should also strongly consider using ```coverage.py```. It checks to see which lines of code are exercise by your tests and identifies the sections that have no coverage. This quickly lets you figure out whether you're testing the code that you're about to optimize, such that any mistakes that might creep in during the optimization process are quickly caught.
+
+## Strategies to Profile Your Code Successfully
+
+Profiling requires some time and concentration. You will stand a better chance of understanding your code if you separate the section you want to test from the main body of your code. YOu can then unit test hte code to preserve correctness, and you can pass in realistic fabricated data to exercise the inefficiencies you want to address.
+
+Do remember to disable any BIOS-based accelerators, as they will only confuse your results.
+
+Your operating system may also control the clock speed - a laptop on battery power is likely to more aggressively control CPU speed than a laptop on AC power. To create a more stable benchmarking configuration, we do the following:
+
+* Disable Turbo Boost in the BIOS.
+* Disable the operating system's ability to override the SpeedStep (you will find this in your BIOS if you're allowed to control it.)
+* Use only AC power (never battery power)
+* Disable background tools like backups and Dropbox while running experiments.
+* Run the experiments many times to obtain a stable measurement.
+* Possibly drop to run level 1 (Unix) so that no other tasks are running.
+* Reboot and rerun the experiments to double-confirm the results.
+
+Try to hypothesize the expected behavior of your code and then validate (or disprove!) the hypothesis with the result of a profiling step. Your choices will not change (you should only drive your decisions by using the profiled results), but your intuitive understanding of the code will improve, and this will pay off in future projects as you will be more likely to make performant decisions. Of course, you will verify these performant decisions by profiling as you go.
+
+Do not skimp on the preparation. If you try to performance test code deep inside a large project without separating it from the larger project, you are likely to witness side effects that will sidetrack your efforts. It is likely to be harder to unit test a large project when you're making fine-grained changes, and this may further hamper your efforts. Side effects could include other threads and processes impacting CPU and memory usage and networking and disk activity, which will skew your results.
+
+Naturally, you're already using source code control, so you'll be able to run multiple experiments in different branches without ever losning "the version that work well."
+
+For web servers, investigate *dowser* and *dozer*; you can use these to visualize in real time the behavior of objects in the namespace. Definitely consider separating the code you want to test out of the main web application if possible, as this will make profiling significantly easier.
+
+Make sure your unit tests exercise all the code paths in the code that you're analyzing. Anything you don't test that is used in your benchmarking may cause subtle errors that will slow down your progress. Use ```coverage.py``` to confirm that your tests are covering all the code paths.
+
+Unit testing a complicated section of code that generates a large numerical output may be difficult. Do not be afraid to output a text file of results to run though ```diff``` or to use a ```pickled``` object.
+
+If your code might be subject to numerical rounding issues due to subtle changes, you are better off with a large output that can be used for a before-and-after comparison. One cause of rounding errors is the difference in floating-point precision between CPU registers and main memory. Running your code through a different code path can cause subtle rounding errors that might later confound you - it is better to be aware of this as soon as they occur.
+
+Obviously, it makes sense to use a source code control tool while you are profiling and optimizing. Branching is cheap, and it will preserve your sanity.
