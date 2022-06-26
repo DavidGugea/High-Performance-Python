@@ -769,3 +769,188 @@ Furthermore, even if we create a list *without* ```append``` (and thus we don't 
 Another benefit of the static nature of tuple is something Python does in the backgorund: resource caching. Python is garbage collected, which means that when a variable isn't used anymore, Python frees the memory used by that variable, giving it back to the operatin system for use in other applications (or for other variables). For tuples of sizes 1-20, however, when they are no longer in use, the space isn't immediately given back to the ystem: up to 20000 of each size are saved for future use. This means that when a new tuple of that size is needed in the future, we don't need to communicate with the operation system to find a region in memory to put the data into, since we ahve a reserve of free memory already. However, this also means that the Python process will have some extra memory overhead.
 
 While this may seem like a small benefit, it is one of the fantastic things about tuples: tehy can be created easily and quickly since they can avoid communications with the operation system, which can cost your program quite a bit of time.
+
+# 4. Dictionaries and Sets
+
+```>```
+
+## What are sets and dictionaries known for
+
+**Sets and dictionaries are ideal data structuresto be used when your data has no intrinsic order (except for insertion order) but does have a unique object that can be used to reference it (ther eference object is normally a string, but it can be any hashable type)**. This refernece object is called the *key*, while the data is the *value*. Dictionaries and sets are almost identical, except that sets do not actually contain values: a set is simply a collection of unique keys. As the name implies, sets are very sueful for doing set operations.
+
+While we saw in the previous chapter that we are restricted to, at best, ```O(log n)``` lookup time on lists/tuples with no intrinsic order (through a search operation), dictionaries and sets give us ```O(1)``` lokups based on the arbitrary index. In addition, like lists/tuples, dictionaries and sets have ```O(1)``` insertion time. This speed is accomplished through the use of an open address hash table as the underlying data structure.
+
+However, there is a cost to using dictionaries and sets. First, they generally take up a larger footprint in memory. Also, although the complexity for insertions/lookups is ```O(1)```, the actual speed depends greatly on the hasing function that is in use. If the has function is slow to evaluate, any operations on dictionaries or sets will be similarly slow.
+
+
+## What is a *hashable* type
+
+A *hashable* type os one that implements both the ```__hash__``` magic function and either ```__eq__``` or ```__cmp__```. All native types in Python already implement ehese, and any user classes have default values.
+The ```__cmp__()``` special method is no longer honored in Python 3.
+
+## How dictionaries and sets work
+
+Dictionaries and sets use *hash tables* to achieve their ```O(1)``` lookups and insertions. This efficiency is the result of a very clever uesage of a hash function to turn an arbitrary key (i.e., a string or ojbect) into an index for a list. The hash function and list can later be used to determine where any particular piece of data is right away, without a search. By turning the dat'as key into something that can be used like a list index, we can get the same performance as with a list. IN addition, instead of having to refere to data by a numerical index, which itself implies some ordering to the data, we can refer to it by this arbitrary key.
+
+## Inserting and Retrieving
+
+To create a hash table from scratch, we start with some allocated memory, similar to what we started with for arrays. For an array, if we want to insert data, we simply find the smallest unused bucket and insert our data there (and resize if necessary). For hash tables, we must first figure out the placement of the data in this contiguous chunk of memory.
+
+The placement of the new data is contingent of two properties of the data we are inserting: the hashed value of the key and how the value compares to other objects. This is because when we insert data, the key is first hashed and masked so that it turns into an effective index in an array. 
+
+A *mask* is a binary number that truncates the value of a number. So ```0b1111101 & 0b111 = 0b101 = 5``` represents the operation of ```0b111``` masking the number ```0b1111101```. This operation can also be thought of as taking a certain number of the least-significant digits of a number.
+
+The mask makes sure that the hash value, whidch can take the value of any integer, fits within the allocated number of buckets. So if we have allocated 8 blocks of memory and our hash value is ```28975```, we consider the bubkcet at index ```28975 & 0b111 = 7```. If, however, our dictionary has grown to require 512 blocks of memory, the mask becomes ```0b111111111``` (and in this case, we would consider the bucket at index ```28975 & 0b111111111```).
+
+Now we must check if this bucket is already in use. If it is empty, we can insert the key and the vlaue into this block of memory. We store the key so that we can make sure we are retrieving the correct value on lookups. If it is in use and the value of the bucket is equal to the value we wish to insert (a comparison done with the ```cmp``` built-in), then the key/value pair is already in the hash table and we can return . However, if the values don't match, we must find a new place to put the data. 
+
+As an extra optimization, Python first appends the key/value data into a standard array and then stores only the *index* into this array in the hash table. This allows us to reduce the amount of memory used by 30-95%. In addition, this gives us the interesting proeprty taht we keep a record of the order which new items were added into the dictionary.
+
+To find the new index, we compute is using a simple linear function, am ethod called *probing*. Python's probing mmechanism adds a contribution from the higher-order bits of the original hash (recall that for a table of length 8 we consider only the last there bits of the hash for the initial index, through the use of a mask value of ```mask = 0b111 = bin(8-1))```. Using these higher-order bits gives each has a different sequence of next possible hashes, which helps to avoid future collisions.
+
+There is a lot of freedom when pickign the algorithm to generate a new index; however, it is quite important that the scheme visits every possible index in order to evenly distribute the data in the table. How well distributed the data is throughout the hash table is called the *load factor* and is related to the entropy of the ahs function. The pseudocode in the following example illustrates the calculation of hash indices used in CPython 3.7. This also shows an interesting fact about hash tables: most of the storage space they have is empty!
+
+```Python
+def index_sequence(key, mask = 0b111, PERTURB_SHIFT=5):
+    perturb = hash(key)
+    i = perturb & mask
+    yield i
+    while True:
+      perturb >>= PERTURB_SHIFT
+      i = (i * 5 + pertrub + 1) & mask
+      yield i
+```
+
+This probing is a modification of the naive method of *linear probing*. In linearg probing, we simply yield the values ```i = (i * 5 + pertrub + 1) && mask```, where ```i``` is initialized to the has hvalue of the key. The value of ```5``` comes from the properties of a linear congruential generator (LCG), which is used in generating random numbers. An important thing to node is that linear probing deals only wit hthe last several bits of the hash and disregards the rest (i.e., for a dictionary with eight elements, we look only at the last three bits since at that point the mask is ```0x111```). This means that if hashing two items gives teh same last three binary digits, we will not only have a colllision, but also the sequence of probed indices will be teh same. The perturbed scheme that Python uses will start taking into consideration more bits from the items' hashes to resolve this problem.
+
+A similar producer is done when we are performing lookups on a specific key: the given key is transformed into an index, and that index is examined. If the key in that index matches (recall that we also store the original key when doing insert operations), then we can return the value. If it doesn't, we keep creating new indices using the same scheme, until we weither find the data or hit an empty bucket. If we hit an empty bucket, we can conclude that the data does not exist in the table.
+
+The following figure illustrates the process of adding data into a hash table. Here, we choose to create a hash function that simply uses the first letter of the input. We accomplish this by using Python's ```ord``` function on the first letter of hte input to get the integer representationg of that letter (recall that hash functions must return integers).
+
+![Resulting hash table from inserting with collisions](ScreenshotsForNotes/Chapter4/ResultingHashTableFromInsertingWithCollisions.PNG)
+
+```Python
+class City(str):
+    def __hash__(self):
+        return ord(self[0])
+
+
+# We createa  dictionary where we assign arbitrary values to cities
+data = {
+    City("Rome"): "Italy",
+    City("San Francisco"): "USA",
+    City("New York"): "USA",
+    City("Barcelona"): "Spain",
+}
+```
+
+In thsi case, ```Barcelona``` and ```Rome``` cause the hash collision (The figure above shows the outcome of this insertion). We see this because, for a dictionary with four elements, we have a mask value of ```0b111```. As a result, ```Barcelona``` and ```Rome``` will try to use the same index:
+
+```Python
+hash("Barcelona") = ord("B") & 0b111
+                  = 66 & 0b111
+                  = 0b1000010 & 0b111
+                  = 0b010 = 2
+
+hash("Rome") = ord("R") & 0b111
+             = 82 & 0b111
+             = 0b1010010 & 0b111
+             = 0b010 = 2
+```
+
+## Deletion
+
+When a value is deleted from a hash table, we cannot simply write a ```NULL``` to that bucket of memory. This is because we ahve used ```NULL```s as a sentinel value while probing for hash collisions. As a result, we must write a special value that signifies that the bucket is empty, but there still may be values after it to consider when resolving a hash collision. So if "Rome" was deelted from the dictionary, subsequente lookups for "Barcelona" will first see this sentinel value where "Rome" used to be and instead of stopping, continue to check the next indices given by the ```index_sequence```. These empty slots ca be written ot in the future and are removed when the hash table is resized.
+
+## Resizing
+
+As mroe items are inserted into the hash table, the table itself must be resized to accommodate them. It can be shwon that a table that is no more htan two-thrids full will have optimal space savings while still having a good obund on the number of collisions to expect. Thus, when a table resaches this critical point, it is grown. To do this, a larger table is allocated (i.e., more buckets in memory are reserved), the mask is adjusted to fit the new table, and all elements of the old table are reinserted into the new one. This requires recomputing indices, since the changed mask will change the resulting index. As a result, resizing large hash tables can be quite expensive! However, since we do this resizing operaiton only when the table is too mslal, as opposed to doing it on every insert, the amortized cost of an insert is still ```O(1)```.
+
+By default, the smallest size of a dictionary or set is 8 (that is, if you are storing only three values, Python will still allocate eight elements), and it will resize by 3x if the dictionary is more than two-thirds full. So once hte sixth item is being inserted into the originally empty dictionary, it wil lbe resized to hold 18 elements. At this piont, once the 13th element is insrted into the object, it wil be resized to 39, then 81, and so on, always increasing the size by 3x. This gives us the following possible sizes:
+
+```8; 18; 39; 81; 165; 333; 669; 1,341; 2,682; 5,373; 10,749; 21,501; 43,005;...```
+
+It is important to note that resizing can happne to make a hahs table large *or* smaller. That is, if sufficicently many elements of a hash table are deleted, the table can be scaled down in size. However, ***resizing happens only during an insert***.
+
+## Hash Functions and Entropy
+
+Objects in Python are generally hashable, since they already have built-in ```__hash__``` and ```__cmp__``` functions asssociated with them. For numerical types (```int``` and ```float```), the hash is based simply on the bit value of the number they represent. Tuplse and strings have a hash value that is based on their contents. Lists, on the other hand, do not support hasing because their values can change. Since a list's values can change, so could the has that represents the list, whcih would hcange the relative placement of that key in the hash table.
+
+User-defined classes also have default hash and comparison functions. The default ```__hash__``` function simply returns the object's placement in memory as given by the built-in ```id``` function. Similarly, the ```__cmp__``` operator compoares the numerical value of the object's placement in memory.
+
+This is generally acceptable, sinc etwo instance of a calss are generally different and should not collied in a hash table. However, ins ome cases we would like to sue ```set``` or ```dict``` objects to disambiguate between items. Take the following class definition:
+
+```Python
+class Point():
+    def __init__(self, x, y):
+        self.x, self.y = x, y
+```
+
+If we were to instantiate multiple ```Point``` objects with the same values for ```x``` and ```y```, they would all be independent objects in memory nad thus have different placements in memory, which owuld give them all different hash values. This means that putting them all into a ```set``` would result in all of them having individual entries:
+
+```Python
+>>> p1 = Point(1, 1)
+>>> p2 = Point(1, 1)
+>>> set([p1, p2])
+set([<__main__.Point at 0x1099bfc90>, <__main__.Point at 0x1099bfbd0>])
+>>> Point(1, 1) in set([p1, p2])
+False
+```
+
+We can remedy this by forming a custom hash function that is based on the actual contents of the object as opposed to the object's placement in memory. The hash function can be any function as long as it consistently gives the same result for the same object (there are also considerations regarding the entropy of the hashing function, which we will discuss later.) The following redefinition of the ```Point``` class will yield the results we expect:
+
+```Python
+class Point():
+    def __init__(self, x, y):
+        self.x, self.y = x, y
+
+    def __hash__(self):
+        return hash((self.x, self.y))
+
+    def __eq__(self, other):
+        return self.x == other.x and self.y == other.y
+```
+
+This allows us to create netires in a set or dictionary indexed by the properties of the ```Point``` object rahter than the memory address of the instantiated object:
+
+```Python
+>>> p1 = Point(1, 1)
+>>> p2 = Point(1, 1)
+>>> set([p1, p2])
+set([<__main__.Point at 0x109b95910>])
+>>> Point(1, 1) in set([p1, p2])
+True
+```
+
+As alluded to when we discussed hash collisions, a custom-selected hash function should be careful to evenly distributed hash values in order to avoid collisions. Having many collisions will degarde the performance of a hash table: if most keys have collisions, we need to constnatly "probe" the other values, effectively walking a potentially large oprtion of the dictionary to find the key in question. In the wordst case, when all keys in a dictionary collide, the performance of lookups in the dictionary is ```O(n)``` and thus the same as if we were searching through a list.
+
+If we know that we are storing 5000 values in a dictionary and we need to create a hashing function for the object we wish to use as a key, we must be aware that the dictionary willbe stored in a hash table of size 16384 and thus only the last 14 bits of our hash are being used to create an index (for a ahsh table if this size, the mask is ```bin(16_384 - 1) = 0b11111111111111```).
+
+This idea of "hwo well distribuetd my hash function is" is called the ***entropy of the hash function****. Entropy is defined as
+
+![Entropy of hash functions](ScreenshotsForNotes/Chapter4/EntropyOfHashFunction.PNG)
+
+where ```p(i)``` is the probability that hte hash function gives hash ```i```. It is maximized when every hash value has equal probability of being chosen. A hash function that maximizes entropy is called an *ideal* hash function since it guarnatees the minimal number of collisions.
+
+For an infinitely large dictionary, the hash function used for integers is ideal. This is becaused the hash value for an integer is simply the integer itself! For an infinitely large dictionary, the mask valeu is inifnite, and thus we consider all bits in the hash value. Therefore, given any two nubmers, we can guarantee that their hash values will not be the same.
+
+However, if we made this dictionary finite, we would no loner have this guarantee. For example, for a dictionary with four elements, the mask we use is ```0b111```. Thsu the has hvalue for the number ```5``` is ```5 & 0b111 = 5```, and the ahs value for ```501``` is ```501 & 0b111 = 5````, and so their entries will collide.
+
+To find the mask for a dictionary with an arbitrary number of elements, ```N```, we first find the minimum number of buckets that dicitonary must have to still be two-third full (```N * (2 / 3 + 1)```). Then we find the smallest dictionary size that will hold this number of elements (8; 32; 128; 512; 2048; etc.) and find the number of bits necessary to hold this number. For example, if ```N=1039```, then we must have at least 1731 buckets, which means we need a dictionary with 2048 buckets. Thus the jmask is ```bin(2048 - 1) = 0b11111111111```.
+
+Ther eis no single best hash function to use when using a finite dictionary. However, knonwing up front what range of value swill be used and how large the ditionary will be helps in makinga good selection. For example, if we are storign all 676 combinations of two lowercase letters as keys in a dictionary (```aa```, ```ab```, ```ac```, etc.), a good hashing function would be the one shown in the following example:
+
+```Python
+def twoletter_hash(key):
+    offset = ord('a')
+    k1, k2 = key
+    return (ord(k2) - offset) + 26 * (ord(k1) - offset)
+```
+
+Thsi gives no hash collisions for any combination of two lowercase letters, considering a mask of ```0b11111111111``` ( adictionary of 676 values will be held in a hash table of length 2048, which has a mask of ```bin(2048 - 1) = 0b11111111111```).
+
+## Dictionaries and Namespaces
+
+Doing a lookup on a dictionary is fast; hwoever, doing it uunnecessarily will slow down your code, just as any extraneous lines will. One area where this surfaces is in Python's namespace management, which heavily uses dictionaries to do its lookups.
+
+Whenver a variable, function, or module is invoked in Python, there is a hierarchy that determines where it looks for these objects. First, Python look inside the ```locals()``` array, which ahs entires for all local variables. Python works hard to make local variables lookups fast, and this is the only part of the chain that doesn't require a dictionary lookup. If it doesn't exist there, the ```globals()``` dictionary is searched. Finally, if the object isn't found there, the ```__builtin__``` object is searched. It is important to note that while ```locals()``` and ```globals9)``` are explicitly dictionaries and ```__builtin__``` is technically a mdoule object, when searching ```__builtin__``` for a given property ,we are just doing a dictionary lookup inside *its* ```locals()``` map (this is the case for all module objects and class objects!).
