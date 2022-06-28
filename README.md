@@ -1498,3 +1498,7 @@ The number of items returned is (n+r-1)! / r! / (n-1)! when n > 0.
 ![Itertools 1](ScreenshotsForNotes/Chapter5/InfiniteIterators.PNG)
 ![Itertools 2](ScreenshotsForNotes/Chapter5/IteratorsTerminatingOnTheShortestInputSequence.PNG)
 ![Itertools 3](ScreenshotsForNotes/Chapter5/CombinatoricIterators.PNG)
+
+# 6. Matrix and Vector Computation
+
+\-
