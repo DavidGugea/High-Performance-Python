@@ -1502,3 +1502,38 @@ The number of items returned is (n+r-1)! / r! / (n-1)! when n > 0.
 # 6. Matrix and Vector Computation
 
 \-
+
+# 7. Compiling to C
+
+```>```
+
+## Introduction
+
+The easiest way to get yoru code to run faster is to make it do less work. Assuming you've already chosen good algorithms and you've reduced the amount of data yoou're processing, the easiset way to execute fewer instructions is to compile your code down to machine code.
+
+Python offers a number of options for this, including pure C-based compiling approaches like Cython; LLVM-based compiling via Numba; and the replacement virtual machine PyPy, which includes a built-in just-in-time (JIT) compiler. You need to balance the requirements of code adaptability and team velocity when deciding which route to take.
+
+Each of these tools adds a new dependency to your toolchain, and Cython requires you to write in a new language type (a hybrid of Python and C), which means you need a new skill. Cython's new language may hurt your team's velocity, as team memebers without knowledge of C may have trouble supporting this code; in practice, though, this is probably a minor concern, as you'll use Cython only in well-chosen, small regions of your code.
+
+It is worth noting that performing CPU and memory profiling on your code will probably start you thinking about higher-level algorithmic optimizations that you might apply. These algorithmic changes (such as additional logic to avoid computations or caching to avoid recalculation) could help you avoid doing unnecessary work in your code, and Python's expressivitiy help you to spot these algorithmic opportunities.
+
+## What sort of speed gains are possible ?
+
+***Gains of an order of magnitude or more are quite possible if your problem yields to a compiled approach.***
+
+Python code that tends to run faster after compiling is mathematical, and it has lots of loops that repeat the same operations many times. Inside these loops, you're probably making lots of temporary objects.
+
+Code that calls out to external libraries (such as regular expresssions, string operations, and calls to database libraries) is unlikely to show any speedup after compiling. Programs that are I/O-bound are also unlikely to show significant speedups.
+
+Similarly, if your Python code focuses on calling vectorized ```numpy```` routines, it may not run an yfaster after compilation - it'll run faster only if the code being compiled is mainly Python (and probably if it is mainly looping).
+
+Overall, it is very unlikely that your compiled code will run any faster than a handcrafted C rountine, but it is also unlikely to run much slower. It is quite possible that the generated C code from your Python will run as fast as a handwritten C routine, unless the C coder has parcticularly good knowledge of ways to tune the C code to the target machine's architecture.
+
+For math-focused code, it is possible that a handcoded Fortran routine will beat an equivalent C routine, but again, this probably requires expert-level knowledge. Overall, a compiled result (probably using Cython) will be as close to a handocded-in-C result as most programmers will need.
+
+Keep the following diagram in mind when you profile and work on your algorithm. A small amount of work on understanding your code through profiling should enable you to make smarter choicse at an algorithmic level. After this, some focused work with a compiler should buy you an additional speedup. It will probably be possible to keep tewaking your algorithm, but don't be surprised to see increasingly small imporvements coming from increasingly large amounts of work on your part. Know when additional effort isn't useful.
+
+![Profiling Diagram](ScreenshotsForNotes/Chapter7/profiling_diagram.PNG)
+
+
+
