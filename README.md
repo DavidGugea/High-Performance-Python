@@ -1535,5 +1535,509 @@ Keep the following diagram in mind when you profile and work on your algorithm. 
 
 ![Profiling Diagram](ScreenshotsForNotes/Chapter7/profiling_diagram.PNG)
 
+If you're dealing with Python code and batteries-included libraries without ```numpy```, Cython and PyPy are your main choices. If you're working with ```numpy```, Cython and Numba are the right choices. These tools all support Python 3.6+.
+
+## JIT versus AOT compilers
+
+By compiling AOT, you create a static library that's specialized to your machine. If you download ```numpy```, ```scipy```, or ```scikit-learn```, it will compile parts of the library using Cython on your machine (or you'll use a prebuilt compiled library, if you're using a distribution lke Continuum's Anaconda). By compiling ahead of use, you'll have a library that can instantly be used to work on solving your problem.
+
+By compiling JIT, you don't have to do much (if any) work up front; you let the compiler step in to compile just the right parts of the code at the time of use. This means you have a "cold star" problem - if most of your program could be compiled and currently noen of it is, when you start running yoru code, it'll run very slowly while it compiles. If this happens every time you run a script and you run the script many times, this cost can become significant. PyPy suffers from this problem, so you may not want to use it for short but frequently running scripts.
+
+The current state of affairs shows us that compiling ahead of time buys us the best speedups, but often this requires the most manual effort. Just-in-time compiling offers some impressive speedups with very little manual intervention, but it can also run into the problem just described. You'll ahve to consider these trade-offs when choosing the right technology for your problem.
+
+## Why does type information help the code run faster?
+
+Python is dynamically typed - a variable can refer to an object of any type, and any lline of code can change the type of the object that is referred to. This makes it difficult for the virtual machine to optimize how the code is executed at the machine code level, as it doesn't konw whcih fundamental datatype will be used for future operations. Keeping the code generic makes it run more slowly.
+
+Inside Python, every fundamental object, such as an integer, will be wrapped up in a higher-level Python object (e.g., an ```int``` for an integer). The higher-level object has extra functions like ```__hash__``` to assist with storage and ```__str__``` for printing.
+
+Inside a seciton of code that is CPU-bound, it is often the case that the types of variables do not change. This gives us an opportunity for static compilation and faster code execution.
+
+If all we want are a lot of intermediate mathematical operations, we don't need the higher-level functions, and we may not need athe machinery for reference coutning either. We can drop down to the machine code level and do our calculations quickly using machine code and bytes, rather than manipulating gthe higher-level Python object, which involves greater overhead. To do this, we determine the types of our objects ahead of time so we can generate the correct C code.
+
+## Using a C compiler
+
+```gcc``` is a very good choice for most platforms; it is well supported and quite advanced. It is often possible to squeeze out more perfromance by using a tuned compiler (e.g., Inte'ls ```icc``` may produce faster code than ```gcc``` on Intel devices), but the cost is that you have to gain more domain knowledge and learn thow ot tune the lfags on the alternative compiler.
+
+C and C++ are often used for static compilation rather than other languages like Fortran because of their ubiquity and the wide ragne of supporting libraries. The compiler and the converter, such as Cython, can study the annotated code to determine wheter static optimization steps (like inlining functions and unrolling loops) can be applied.
+
+Aggressive analysis of the intermediate abstract syntax tree (performed by Numba and PyPy) provides opportunities to combine knowledge of Python'ws way of expressing things to inform the underlying compiler how best to take advantage of the patterns that have been seen.
+
+## Cython
+
+Cython is a compile rthat converts type-annotated Python into a compiled extension module. The type annotations are C-like.  This extension can be imported as a regular Python module using ```import```. Getting started is simple, but a learning curve must be climbed with each additional elvel of complexity and optimization.
+
+With the OpenMP standard, it is possible to convert parallel poroblems into multiprocessing-aware modules that run on multiple CPUs on one machine. The threads are hidden from your Python code; they operate via the generate C code.
+
+Cython is a fork of Pyrex that expands the capabilities beyond the original aims of Pyrex. LIbraires that use Cython include SciPy, scikit-learn, lxml, and ZeroMQ.
+
+Cython can be used via a ```setup.py``` script to compile a module. It can also be used interactively in IPython via a "magic" command. Typically, the types are annotated by the developer. although some automated annotaiton is possible.
+
+## Compiling a pure python version using cython
+
+The easy way to being writing a compiled extension module involves three files. Using our Julia set as an example, they are as follows:
+
+* The calling Python code ( the bulk of our Julai code from earlier )
+* The function to be compiled in a new ```.pyx``` file
+* A ```setup.py``` that contains the instructions for calling Cython to make the extension module
+
+Using this approach, the ```setup.py``` script is called to use Cython to compile the ```.pyx``` file into a compiled module. On Unix-like systems, the compiled module will probably be a ```.so``` file; on Windows it should be a ```.pyd``` (DLL-like Pyton Library).
+
+For the Julia example, we'll use the following:
+
+* ```julia1.py``` to build the input lists and call the calculation function
+* ```cythonfn.pyx```, which contains the CPU-bound function that we can annotate
+* ```setup.py```, which contains the build instructions
+
+The result of running ```setup.py``` is a module that can be imported. In our ```julia1.py``` script in the following example, we need only to make some tiny change to ```import``` the new module and call our function.
+
+```Python
+# Inside julia1.py
+import cythonfn
+
+def calc_pure_python(desired_width, max_iterations):
+    start_time = time.time()
+    output = ctyhonfn.calcualte_z(max_iterations, zs, cs)
+    end_time = time.time()
+    secs = end_time - start_time
+    print(f"Took {secs:0.2f} seconds")
+```
+
+In the next example, we wil lstar twith a pure Python version without type annotations:
+
+```Python
+# cythonfn.pyx
+
+def calculate_z(maxiter, zs, cs):
+    """Calcualte output list using Julia update rule"""
+    output = [0] * len(zs)
+    for i in range(len(zs)):
+        n = 0
+        z = zs[i]
+        c = cs[i]
+
+        while n < maxiter and abs(z) < 2:
+            z = z * z + c
+            n += 1
+
+        output[i] = n
+
+    return output
+```
+
+The following ```setup.py``` script is short; it defines thow to convert ```cythonfn.pyx``` into ```calculate.so```:
+
+```Python
+from distutils.core import setup
+from Cython.Build import cythonize
+
+setup(
+    ext_modules=cythonize(
+        "cythonfn.pyx",
+        compiler_directives = {
+            "language_level": "3"
+        }
+    )
+)
+```
+
+When we run ```setup.py``` script with the argument ```build_ext```, Cython will look for ```cythonfn.pyx``` and built ```cythonfn.so```. The ```language_levle``` is hardcoded to 3 here to force Python 3.x support.
+
+Remember that hits is a manual step - if you update your ```.pyx``` or ```setup.py``` and forget to rerun the build command, you won't have an updated ```.so``` module to import. If you're unsure whether you combipled the code, check the timestamp for the ```.so``` file. If in doubt, delete the generated C files and the ```.so``` file and build them again.
+
+```bash
+$ python setup.py build_ext --inplace
+```
+
+The ```--inplace``` argument tells Cython to build the compiled module into the current directory rather than into a separate *build* directory. After the build has completed, we'll have the intermediate ```cythonfn.c```, which is rather hard to read, along with ```cythonfn.so```.
+
+## ```pyximport```
+
+A simplifed build system has been introduced via ```pyximport```. If yoru code has a simple setup and doesn't require third-party modules, you may be able to do away with ```setup.py``` completely.
+
+By importing ```pyximport``` as seen in the following example and calling ```install```, any subsequently imported ```.pyx``` file will be automatically compiled. This ```.pyx``` file can include annotations, or in this case, it can be the unannotated code. The result runs in 4.7 seconds, as before; the only differencei s that we didn't have to write a ```setup.py``` file:
+
+```Python
+import pyximport
+pyximport.install(language_level=3)
+import cythonfn  # as defined in setup.py
+```
+
+## Cython annotations to analyze a block of code
+
+The preceding example shows that we can quickly build a compiled module. For tight loops and mathematical operations, this alone often leads to a speedup. Obviously, though, we should not optimize blindly—we need to know which lines of code take a lot of time so we can decide where to focus our efforts. Cython has an annotation option that will output an HTML file we can view in a browser. We use the command cython -a cythonfn.pyx, and the output file cythonfn.html is generated. Viewed in a browser, it looks something like the following figure:
+
+![Generated Cython](ScreenshotsForNotes/Chapter7/generated_cython.PNG)
+
+Each line can be expanded with a double-click to show the generated C code. More yellow means “more calls into the Python virtual machine,” while more white means “more non-Python C code.” The goal is to remove as many of the yellow lines as possible and end up with as much white as possible. Although “more yellow lines” means more calls into the virtual machine, this won’t necessarily cause your code to run slower. Each call into the virtual machine has a cost, but the cost of those calls will be significant only if the calls occur inside large loops. Calls outside large loops (for example, the line used to create output at the start of the function) are not expensive relative to the cost of the inner calculation loop. Don’t waste your time on the lines that don’t cause a slowdown. In our example, the lines with the most calls back into the Python virtual machine (the “most yellow”) are lines 4 and 8. From our previous profiling work, we know that line 8 is likely to be called over 30 million times, so that’s a great candidate to focus on. Lines 9, 10, and 11 are almost as yellow, and we also know they’re inside the tight inner loop. In total they’ll be responsible for the bulk of the execution time of this function, so we need to focus on these first. Refer back to “Using line_profiler for Line-by-Line Measurements” if you need to remind yourself of how much time is spent in this section. Lines 6 and 7 are less yellow, and since they’re called only 1 million times, they’ll have a much smaller effect on the final speed, so we can focus on them later. In fact, since they are list objects, there’s actually nothing we can do to speed up their access except, as you’ll see in “Cython and numpy”, to replace the list objects with numpy arrays, which will buy a small speed advantage. To better understand the yellow regions, you can expand each line. In the following figure, we can see that to create the output list, we iterate over the length of zs, building new Python objects that are reference-counted by the Python virtual machine. Even though these calls are expensive, they won’t really affect the execution time of this function. To improve the execution time of our function, we need to start declaring the types of objects that are involved in the expensive inner loops. These loops can then make fewer of the relatively expensive calls back into the Python virtual machine, saving us time. In general, the lines that probably cost the most CPU time are those:
+
+* Inside tight inner loops
+* Dereferencing ```list```, ```array```, or ```np.array``` items
+* Performing mathematical operations
+
+![Generated Cython](ScreenshotsForNotes/Chapter7/generated_cython_2.PNG)
+
+If you don’t know which lines are most frequently executed, using a profiling tool—line_profiler, discussed in “Using line_profiler for Line-by-Line Measurements”, wouldbe the most appropriate. You’ll learn which lines are executed most frequently and whichlines cost the most inside the Python virtual machine, so you’ll have clear evidence of whichlines you need to focus on to get the best speed gain.
+
+## Adding some type annotations
+
+The first generated cython code in the first figure shows that almost every line of our function is calling back into thePython virtual machine. All of our numeric work is also calling back intoPython as we are using the higher-level Python objects. We need to convertthese into local C objects, and then, after doing our numerical coding, weneed to convert the result back to a Python object.
+
+In the following example, we see how to add some primitive types by using the cdefsyntax.
+
+It is important to note that these types will be understood only by Cython and not by Python.Cython uses these types to convert the Python code to C objects, which do not have to callback into the Python stack; this means the operations run at a faster speed, but they loseflexibility and development speed.
+
+The types we add are as follows:
+
+* int for a signed integer
+* unsigned int for an integer that can only be positive
+* double complex for double-precision complex numbers
+
+The ```cdef``` keyword lets us declare variables inside the function body. Thesemust be declared at the top of the function, as that’s a requirement from the C language specification
+
+```Python
+def calculate_z(int maxiter, zs, cs):
+    """Calculate output list using Julia update rule"""
+    cdef unsigned int i, n
+    cdef double complex z, c
+    output = [0] * len(zs)
+    for i in range(len(zs)):
+        n = 0
+        z = zs[i]
+        c = cs[i]
+
+        while n < maxiter and abs(z) < 2:
+            z = z * z + c
+            n += 1
+
+        output[i] = n
+
+    return output
+```
+
+When adding Cython annotations, you’re adding non-Python code to the .pyx file. This means you lose the interactive nature of developing Python in the interpreter. For those ofyou familiar with coding in C, we go back to the code-compile-run-debug cycle.
+
+You might wonder if we could add a type annotation to the lists that we passin. We can use the list keyword, but this has no practical effect for this example. The list objects still have to be interrogated at the Python level topull out their contents, and this is very slow.
+
+The act of giving types to some of the primitive objects is reflected in theannotated output in the following figure. Critically, lines 11 and 12—two of our mostfrequently called lines—have now turned from yellow to white, indicating thatthey no longer call back to the Python virtual machine. We can anticipate agreat speedup compared to the previous version.
+
+![Generated Cython](ScreenshotsForNotes/Chapter7/generated_cython_3.PNG)
+
+After compiling, this version takes 0.49 seconds to complete. With only a fewchanges to the function, we are running at 15 times the speed of the originalPython version.
+
+It is important to note that the reason we are gaining speed is that more of thefrequently performed operations are being pushed down to the C level—inthis case, the updates to z and n. This means that the C compiler can optimize the way the lower-level functions are operating on the bytes thatrepresent these variables, without calling into the relatively slow Python virtual machine.
+
+As noted earlier in this chapter, abs for a complex number involves taking the square root of the sum of the squares of the real and imaginary components. In our test, we want to see if the square root of the result is less than 2. Rather than taking the square root, we can instead square the other side of the comparison, so we turn < 2 into < 4. This avoids having to calculate the square root as the final part of the abs function.
+
+In essence, we started with:
+
+![math](ScreenshotsForNotes/Chapter7/math_example.PNG)
+
+and we have simplified the operation to
+
+![math](ScreenshotsForNotes/Chapter7/math_example_2.PNG)
+
+If we retained the sqrt operation in the following code, we would still see an improvement in execution speed. One of the secrets to optimizing code is to make it do as little work as possible. Removing a relatively expensive operation by considering the ultimate aim of a function means that the C compiler can focus on what it is good at, rather than trying to intuit the programmer’s ultimate needs.
+
+Writing equivalent but more specialized code to solve the same problem is known as strength reduction. You trade worse flexibility (and possibly worse readability) for faster execution.
+
+This mathematical unwinding leads to the following example, in which we have replaced the relatively expensive abs function with a simplified line of expanded mathematics.
+
+```Python
+#cython: boundscheck=False
+def calculate_z(int maxiter, zs, cs):
+    """Calculate output list using Julia update rule"""
+    cdef unsigned int i, n
+    cdef double complex z, c
+    output = [0] * len(zs)
+
+    for i in range(len(zs)):
+        n = 0
+        z = zs[i]
+        c = cs[i]
+
+        while n < maxiter and (z.real * z.real + z.imag * z.imag) < 4:
+            z = z * z + c
+            n += 1
+
+        output[i] = n
+
+    return output
+```
+
+By annotating the code, we see that the while on line 10 (of the following figure) has become a little more yellow—it looks as though it might be doing more work rather than less. It isn’t immediately obvious how much of a speed gain we’ll get, but we know that this line is called over 30 million times, so we anticipate a good improvement.
+
+This change has a dramatic effect—by reducing the number of Python calls in the innermost loop, we greatly reduce the calculation time of the function. This new version completes in just 0.19 seconds, an amazing 40× speedup over the original version. As ever, take a guide from what you see, but measure to test all of your changes.
+
+![Generated Cython](ScreenshotsForNotes/Chapter7/generated_cython_4.PNG)
+
+For a final possible improvement on this piece of code, we can disable bounds checking for each dereference in the list. The goal of the bounds checking is to ensure that the program does not access data outside the allocated array—in C it is easy to accidentally access memory outside the bounds of an array, and this will give unexpected results (and probably a segmentation fault!).
+
+By default, Cython protects the developer from accidentally addressing outside the list’s limits. This protection costs a little bit of CPU time, but it occurs in the outer loop of our function, so in total it won’t account for much time. Disabling bounds checking is usually safe unless you are performing your own calculations for array addressing, in which case you will have to be careful to stay within the bounds of the list.
+
+Cython has a set of flags that can be expressed in various ways. The easiest is to add them as single-line comments at the start of the .pyx file. It is also possible to use a decorator or compile-time flag to change these settings. To disable bounds checking, we add a directive for Cython inside a comment at the start of the .pyx file
+
+```Python
+#cython: boundscheck = False
+def calculate_z(int maxiter, zs, cs):
+```
+
+## Numba
+
+Numba from Continuum Analytics is a just-in-time compiler that specializes in numpy code, which it compiles via the LLVM compiler (not via g++ or gcc++, as used by our earlier examples) at runtime. It doesn’t require a precompilation pass, so when you run it against new code, it compiles each annotated function for your hardware. The beauty is that you provide a decorator telling it which functions to focus on and then you let Numba take over. It aims to run on all standard numpy code.
+
+Numba is now fairly stable, so if you use numpy arrays and have nonvectorized code that iterates over many items, Numba should give you a quick and very painless win. Numba does not bind to external C libraries (which Cython can do), but it can automatically generate code for GPUs (which Cython cannot).
+
+One drawback when using Numba is the toolchain—it uses LLVM, and this has many dependencies. We recommend that you use Continuum’s Anaconda distribution, as everything is provided; otherwise, getting Numba installed in a fresh environment can be a very time-consuming task.
+
+The following example shows the addition of the @jit decorator to our core Julia function. This is all that’s required; the fact that numba has been imported means that the LLVM machinery kicks in at execution time to compile this function behind the scenes.
+
+```Python
+from numba import jit
+
+@jit()
+def calcualte_z_serial_purepython(maxiter, zs, cs, output):
+```
+
+If the @jit decorator is removed, this is just the numpy version of the Julia demo running with Python 3.7, and it takes 21 seconds. Adding the @jit decorator drops the execution time to 0.75 seconds. This is very close to the result we achieved with Cython, but without all of the annotation effort.
+
+If we run the same function a second time in the same Python session, it runs even faster at 0.47 seconds—there’s no need to compile the target function on the second pass if the argument types are the same, so the overall execution speed is faster. On the second run, the Numba result is equivalent to the Cython with numpy result we obtained before (so it came out as fast as Cython for very little work!). PyPy has the same warm-up requirement.
+
+If you’d like to read another view on what Numba offers, see “Numba”, where core developer Valentin Haenel talks about the @jit decorator, viewing the original Python source, and going further with parallel options and the typed List and typed Dict for pure Python compiled interoperability
+
+## PyPy
+
+PyPy is an alternative implementation of the Python language that includes a tracing just-in-time compiler; it is compatible with Python 3.5+. Typically, it lags behind the most recent version of Python; at the time of writing this second edition Python 3.7 is standard, and PyPy supports up to Python 3.6. PyPy is a drop-in replacement for CPython and offers all the built-in module s. The project comprises the RPython Translation Toolchain, which is used to build PyPy (and could be used to build other interpreters). The JIT compiler in PyPy is very effective, and good speedups can be seen with little or no work on your part.
+
+PyPy runs our pure Python Julia demo without any modifications. With CPython it takes 8 seconds, and with PyPy it takes 0.9 seconds. This means that PyPy achieves a result that’s very close to the Cython example , without any effort at all—that’s pretty impressive! As we observed in our discussion of Numba, if the calculations are run again in the same session, then the second and subsequent runs are faster than the first one, as they are already compiled.
+
+The fact that PyPy supports all the built-in modules is interesting—this means that multiprocessing works as it does in CPython. If you have a problem that runs with the batteries-included modules and can run in parallel with multiprocessing, you can expect that all the speed gains you might hope to get will be available.
+
+PyPy’s speed has evolved over time. The older chart in the following figure (from speed.pypy.org) will give you an idea about PyPy’s maturity. These speed tests reflect a wide range of use cases, not just mathematical operations. It is clear that PyPy offers a faster experience than CPython.
+
+![PyPy](ScreenshotsForNotes/Chapter7/pypy_chart.PNG)
+
+### Garbage collection differences
+
+PyPy uses a different type of garbage collector than CPython, and this can cause some nonobvious behavior changes to your code. Whereas CPython uses reference counting, PyPy uses a modified mark-and-sweep approach that may clean up an unused object much later. Both are correct implementations of the Python specification; you just have to be aware that code modifications might be required when swapping.
+
+Some coding approaches seen in CPython depend on the behavior of the reference counter—particularly the flushing of files, if you open and write to them without an explicit file close. With PyPy the same code will run, but the updates to the file might get flushed to disk later, when the garbage collector next runs. An alternative form that works in both PyPy and Python is to use a context manager using with to open and automatically close files. The Differences Between PyPy and CPython page on the PyPy website lists the details.
+
+## A summary of speed improvements
+
+To summarize the previous results, in the first table we see that PyPy on a pure Python math-based code sample is approximately 9× faster than CPython with no code changes, and it’s even faster if the abs line is simplified. Cython runs faster than PyPy in both instances but requires annotated code, which increases development and support effort:
+
+![Table](ScreenshotsForNotes/Chapter7/table1.PNG)
+
+The Julia solver with numpy enables the investigation of OpenMP. In the next table, we see that both Cython and Numba run faster than the non-numpy versions with expanded math. When we add OpenMP, both Cython and Numba provide further speedups for very little additional coding
+
+![Table](ScreenshotsForNotes/Chapter7/table2.PNG)
+
+For pure Python code, PyPy is an obvious first choice. For ```numpy``` code, Numba is a great first choice.
+
+## When to use each technology
+
+If you're working on a numeric proejct, then each of these technoologies could be useful to you. The next table summarizes the main options.
+
+![Table](ScreenshotsForNotes/Chapter7/table3.PNG)
+
+## Graphics Processing Units (GPUs)
+
+Graphics Processing Units (GPUs) are becoming incredibly popular as a method to speed up arithmetic-heavy computational workloads. Originally designed to help handle the heavy linear algebra requirements of 3D graphics, GPUs are particularly well suited for solving easily parallelizable problems.
+
+Interestingly, GPUs themselves are slower than most CPUs if we just look at clock speeds. This may seem counterintuitive, but as we discussed in “Computing Units”, clock speed is just one measurement of hardware’s ability to compute. GPUs excel at massively parallelize tasks because of the staggering number of compute cores they have. CPUs generally have on the order of 12 cores, while modern-day GPUs have thousands.
+
+## Basic GPU Profiling
+
+One way to verify exactly how much of the GPU we are utilizing is by using the nvidia-smi command to inspect the resource utilization of the GPU. The two values we are most interested in are the power usage and the GPU utilization:
+
+![GPU-PROFILING](ScreenshotsForNotes/Chapter7/gpu_profiling.PNG)
+
+GPU utilization, here at 95%, is a slightly mislabeled field. It tells us what percentage of the last second has been spent running at least one kernel. So it isn’t telling us what percentage of the GPU’s total computational power we’re using but rather how much time was spent not being idle. This is a very useful measurement to look at when debugging memory transfer issues and making sure that the CPU is providing the GPU with enough work. Power usage, on the other hand, is a good proxy for judging how much of the GPU’s compute power is being used. As a rule of thumb, the more power the GPU is drawing, the more compute it is currently doing. If the GPU is waiting for data from the CPU or using only half of the available cores, power use will be reduced from the maximum.
+
+Another useful tool is gpustat. This project provides a nice view into many of NVIDIA’s stats using a much friendlier interface than nvidia-smi.
+
+## Performance considerations of GPUs
+
+Since a GPU is a completely auxiliary piece of hardware on the computer, with its own architecture as compared with the CPU, there are many GPUspecific performance considerations to keep in mind.
+
+The biggest speed consideration for GPUs is the transfer time of data from the system memory to the GPU memory.
+
+GPUs are not particularly good at running multiple tasks at the same time. When starting up a task that requires heavy use of the GPU, ensure that no other tasks are utilizing it by running nvidia-smi. However, if you are running a graphical environment, you may have no choice but to have your desktop and GPU code use the GPU at the same time.
+
+## When to use GPUs
+
+We’ve seen that GPUs can be incredibly quick; however, memory considerations can be quite devastating to this runtime. This seems to indicate that if your task requires mainly linear algebra and matrix manipulations (like multiplication, addition, and Fourier transforms), then GPUs are a fantastic tool. This is particularly true if the calculation can 5 happen on the GPU uninterrupted for a period of time before being copied back into system memory.
+
+In addition, because of the limited memory of the GPU, it is not a good tool for tasks that require exceedingly large amounts of data, many conditional manipulations of the data, or changing data. Most GPUs made for computational tasks have around 12 GB of memory, which puts a significant limitation on “large amounts of data.” However, as technology improves, the size of GPU memory increases, so hopefully this limitation becomes less drastic in the future.
+
+The general recipe for evaluating whether to use the GPU consists of the following steps:
+
+1. Ensure that the memory use of the problem will fit within the GPU (in “Using memory_profiler to Diagnose Memory Usage”, we explore profiling memory use).
+2. Evaluate whether the algorithm requires a lot of branching conditions versus vectorized operations. As a rule of thumb, numpy functions generally vectorize very well, so if your algorithm can be written in terms of numpy calls, your code probably will vectorize well! You can also check the branches result when running perf (as explained in “Understanding perf”).
+3. Evaluate how much data needs to be moved between the GPU and the CPU. Some questions to ask here are “How much computation can I do before I need to plot/save results?” and “Are there times my code will have to copy the data to run in a library I know isn’t GPUcompatible?”
+4. Make sure PyTorch supports the operations you’d like to do! PyTorch implements a large portion of the numpy API, so this shouldn’t be an issue. For the most part, the API is even the same, so you don’t need to change your code at all. However, in some cases either PyTorch doesn’t support an operation (such as dealing with complex numbers) or the API is slightly different (for example, with generating random numbers).
+
+Considering these four points will help give you confidence that a GPU approach would be worthwhile. There are no hard rules for when the GPU will work better than the CPU, but these questions will help you gain some intuition
+
+## Foregin Function Interfaces
+
+Sometimes the automatic solutions just don’t cut it, and you need to write custom C or Fortran code yourself. This could be because the compilation methods don’t find some potential optimizations, or because you want to take advantage of libraries or language features that aren’t available in Python. In all of these cases, you’ll need to use foreign function interfaces, which give you access to code written and compiled in another language.
+
+### ```ctypes```
+
+The most basic foreign function interface in CPython is through the ctypes module. The bare-bones nature of this module can be quite inhibitive at times—you are in charge of doing everything, and it can take quite a while to make sure that you have everything in order. This extra level of complexity is evident in our ctypes diffusion code, shown in the following example:
+
+```Python
+import ctypes
+grid_shape = (512, 512)
+_diffusion = ctypes.CDLL("diffusion.so")
+
+# Create references to the C types that we will need to simplify future code
+TYPE_INT = ctypes.c_int
+TYPE_DOUBLE = ctypes.c_double
+TYPE_DOUBLE_SS = ctypes.POINTER(ctypes.POINTER(ctypes.c_double))
+
+# Initialize the signature of the evolve function to:
+# void evolve(int, int, double**, double**, double, double)
+_diffusion.evolve.argtypes = [TYPE_DOUBLE_SS, TYPE_DOUBLE_SS, TYPE_DOUBLE,
+TYPE_DOUBLE]
+_diffusion.evolve.restype = None
+
+def evolve(grid, out, dt, D=1.0):
+    # First we convert the Python types into the relevant C types
+    assert grid.shape == (512, 512)
+    cdt = TYPE_DOUBLE(dt)
+    cD = TYPE_DOUBLE(D)
+    pointer_grid = grid.ctypes.data_as(TYPE_DOUBLE_SS)
+    pointer_out = out.ctypes.data_as(TYPE_DOUBLE_SS)
+    # Now we can call the function
+    _diffusion.evolve(pointer_grid, pointer_out, cD, cdt)
+```
+
+This first thing we do is “import” our shared library. This is done with the ctypes.CDLL call. In this line, we can specify any shared library that Python can access (for example, the ctypes-opencv module loads the libcv.so library). From this, we get a _diffusion object that contains all the members that the shared library contains. In this example, diffusion.so contains only one function, evolve, which is now made available to us as a property of the _diffusion object. If diffusion.so had many functions and properties, we could access them all through the _diffusion object.
+
+However, even though the _diffusion object has the evolve function available within it, Python doesn’t know how to use it. C is statically typed, and the function has a very specific signature. To properly work with the evolve function, we must explicitly set the input argument types and the return type. This can become quite tedious when developing libraries in tandem with the Python interface, or when dealing with a quickly changing library. Furthermore, since ctypes can’t check if you have given it the correct types, your code may silently fail or segfault if you make a mistake!
+
+Furthermore, in addition to setting the arguments and return type of the function object, we also need to convert any data we care to use with it (this is called casting). Every argument we send to the function must be carefully casted into a native C type. Sometimes this can get quite tricky, since Python is very relaxed about its variable types. For example, if we had num1 = 1e5, we would have to know that this is a Python float, and thus we should use a ctype.c_float. On the other hand, for num2 = 1e300, we would have to use ctype.c_double, because it would overflow a standard C float.
+
+That being said, numpy provides a .ctypes property to its arrays that makes it easily compatible with ctypes. If numpy didn’t provide this functionality, we would have had to initialize a ctypes array of the correct type and then find the location of our original data and have our new ctypes object point there.
+
+Unless the object you are turning into a ctype object implements a buffer (as do the array module, numpy arrays, io.StringIO, etc.), your data will be copied into the new object. In the case of casting an int to a float, this doesn’t mean much for the performance of your code. However, if you are casting a very long Python list, this can incur quite a penalty! In these cases, using the array module or a numpy array, or even building up your own buffered object using the struct module, would help. This does, however, hurt the readability of your code, since these objects are generally less flexible than their native Python counterparts.
+
+This memory management can get even more complicated if you have to send the library a complicated data structure. For example, if your library expects a C struct representing a point in space with the properties x and y, you would have to define the following:
+
+```Python
+from ctypes import Structure
+
+class cPoint(Structure):
+    _fields_ = ("x", c_int), ("y", c_int)
+```
+
+At this point you could start creating C-compatible objects by initializing a cPoint object (i.e., point = cPoint(10, 5)). This isn’t a terrible amount of work, but it can become tedious and results in some fragile code. What happens if a new version of the library is released that slightly changes the structure? This will make your code very hard to maintain and generally results in stagnant code, where the developers simply decide never to upgrade the underlying libraries that are being used.
+
+For these reasons, using the ctypes module is great if you already have a good understanding of C and want to be able to tune every aspect of the interface. It has great portability since it is part of the standard library, and if your task is simple, it provides simple solutions. Just be careful because the complexity of ctypes solutions (and similar low-level solutions) quickly becomes unmanageable
+
+### cffi
+
+Realizing that ctypes can be quite cumbersome to use at times, cffi attempts to simplify many of the standard operations that programmers use. It does this by having an internal C parser that can understand function and structure definitions.
+
+As a result, we can simply write the C code that defines the structure of the library we wish to use, and then cffi will do all the heavy work for us: it imports the module and makes sure we specify the correct types to the resulting functions. In fact, this work can be almost trivial if the source for the library is available, since the header files (the files ending in .h) will include all the relevant definitions we need. The following example shows the cffi version of the 2D diffusion code:
+
+```Python
+from cffi import FFI, verifier
+
+grid_shape = (512, 512)
+
+ffi = FFI()
+
+ffi.cdef(
+    "void evolve(double **in, double **out, double D, double dt);"
+)
+lib = ffi.dlopen("../diffusion.so")
+
+def evolve(grid, dt, out, D=1.0):
+    pointer_grid = ffi.cast("double**", grid.ctypes.data)
+    pointer_out = ffi.cast("double**", out.ctypes.data)
+
+    lib.evolve(pointer_grid, pointer_out, D, dt)
+```
+
+In the preceding code, we can think of the cffi initialization as being twostepped. First, we create an FFI object and give it all the global C declarations we need. This can include datatypes in addition to function signatures. These signatures don’t necessarily contain any code; they simply need to define what the code will look like. Then we can import a shared library containing the actual implementation of the functions by using dlopen. This means we could have told FFI about the function signature for the evolve function and then loaded up two different implantations and stored them in different objects (which is fantastic for debugging and profiling!).
+
+In addition to easily importing a shared C library, cffi allows you to write C code and have it be dynamically compiled using the verify function. This has many immediate benefits—for example, you can easily rewrite small portions of your code to be in C without invoking the large machinery of a separate C library. Alternatively, if there is a library you wish to use, but some glue code in C is required to have the interface work perfectly, you can inline it into your cffi code, as shown in the following example, to have everything be in a centralized location. In addition, since the code is being dynamically compiled, you can specify compile instructions to every chunk of code you need to compile. Note, however, that this compilation has a one-time penalty every time the verify function is run to actually perform the compilation.
+
+```Python
+from cffi import FFI, verifier
+
+grid_shape = (512, 512)
+
+ffi = FFI()
+
+ffi.cdef(
+    "void evolve(double **in, double **out, double D, double dt);"
+)
+lib = ffi.dlopen("../diffusion.so")
+
+lib = ffi.verify(
+    r"""
+        void evolve(double in[][512], double out[][512], double D, double dt) {
+            int i, j;
+            double laplacian;
+
+            for(i = 1 ; i < 511; i++) {
+                for (j = 1 ; j < 511;j++) {
+                    laplacian = in[i+1][j] + in[i-1][j] + in[i][j+1] + in[i][j-1] - 4 * in[i][j];
+                    out[i][j] = in[i][j] + D * dt * laplacian;
+                }
+            }
+        }
+    """,
+    extra_compile_args = ["-03"]
+)
+```
+
+Another benefit of the verify functionality is that it plays nicely with complicated cdef statements. For example, if we were using a library with a complicated structure but wanted to use only a part of it, we could use the partial struct definition. To do this, we add a ... in the struct definition in ffi.cdef and #include the relevant header file in a later verify.
+
+For example, suppose we were working with a library with header complicated.h that included a structure that looked like this:
+
+```Python
+struct Point {
+    double x;
+    double y;
+    bool isActive;
+    char *id;
+    int num_times_visited;
+}
+```
+
+If we cared only about the ```x``` and ```y``` properties, we could write some simple ```cffi``` code that cares only about those values:
+
+```Python
+from cffi import FFI
+
+ffi = FFI()
+ffi.cdef(r"""
+    struct Point {
+        double x;
+        double y;
+        ...;
+    };
+    struct Point do_calculation();
+""")
+
+lib = ffi.verify(r"""
+    #include <complicated.h>
+""")
+```
 
 
+### CPython Module
+
+Finally, we can always go right down to the CPython API level and write a CPython module. This requires us to write code in the same way that CPython is developed and take care of all of the interactions between our code and the implementation of CPython. This has the advantage that it is incredibly portable, depending on the Python version. We don’t require any external modules or libraries, just a C compiler and Python! However, this doesn’t necessarily scale well to new versions of Python. For example, CPython modules written for Python 2.7 won’t work with Python 3, and vice versa.
+
+In fact, much of the slowdown in the Python 3 rollout was rooted in the difficulty in making this change. When creating a CPython module, you are coupled very closely to the actual Python implementation, and large changes in the language (such as the change from 2.7 to 3) require large modifications to your module.
+
+That portability comes at a big cost, though—you are responsible for every aspect of the interface between your Python code and the module. This can make even the simplest tasks take dozens of lines of code.
+
+All in all, this method should be left as a last resort. While it is quite informative to write a CPython module, the resulting code is not as reusable or maintainable as other potential methods. Making subtle changes in the module can often require completely reworking it. In fact, we include the module code and the required setup.py to compile it as a cautionary tale.
