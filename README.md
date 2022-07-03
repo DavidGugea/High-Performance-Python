@@ -2097,5 +2097,12 @@ if __name__ == '__main__':
     eventloop = EventLoop()
     eventloop.put(do_hello)
     eventloop.start()
-
 ```
+
+This may not seem like a big change; however, we can couple event loops with asynchronous (async) I/O operations for massive gains when performing I/O tasks. In this example, the call eventloop.put(do_world) approximates an asynchronous call to the do_world function. This operation is called nonblocking, meaning it will return immediately but guarantee that do_world is called at some point later. Similarly, if this were a network write with an async function, it will return right away even though the write has not happened yet. When the write has completed, an event fires so our program knows about it.
+
+Putting these two concepts together, we can have a program that, when an I/O operation is requested, runs other functions while waiting for the original I/O operation to complete. This essentially allows us to still do meaningful calculations when we otherwise would have been in I/O wait.
+
+Switching from function to function does have a cost. The kernel must take the time to set up the function to be called in memory, and the state of our caches won’t be as predictable. It is because of this that concurrency gives the best results when your program has a lot of I/O wait—the cost associated with switching can be much less than what is gained by making use of I/O wait time.
+
+Generally, programming using event loops can take two forms: callbacks or futures. In the callback paradigm, functions are called with an argument that is generally called the callback. Instead of the function returning its value, it calls the callback function with the value instead. This sets up long chains of functions that are called, with each function getting the result of the previous function in the chain (these chains are sometimes referred to as “callback hell”).
