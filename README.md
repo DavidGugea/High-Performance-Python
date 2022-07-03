@@ -2239,3 +2239,99 @@ Now add another nine computers and test to see if you’re processing jobs 10 ti
 To reliably start the cluster’s components when the machine boots, we tend to use either a cron job, Circus, or supervisord. Circus and supervisord are both Pythonbased and have been around for years. cron is old but very reliable if you’re just starting scripts like a monitoring process that can start subprocesses as required.
 
 Once you have a reliable cluster, you might want to introduce a random-killer tool like Netflix’s Chaos Monkey, which deliberately kills parts of your system to test them for resiliency. Your processes and your hardware will die eventually, and it doesn’t hurt to know that you’re likely to survive at least the errors you predict might happen
+
+# 11. Using Less RAM
+
+## Introduction
+
+We rarely think about how much RAM we’re using until we run out of it. If you run out while scaling your code, it can become a sudden blocker. Fitting more into a machine’s RAM means fewer machines to manage, and it gives you a route to planning capacity for larger projects. Knowing why RAM gets eaten up and considering more efficient ways to use this scarce resource will help you deal with scaling issues. We’ll use the Memory Profiler and IPython Memory Usage tools to measure the actual RAM usage, along with some tools that introspect objects to try to guess how much RAM they’re using.
+
+A consideration with RAM usage is the notion that “data has mass.” The more there is of it, the slower it moves around. If you can be parsimonious in your use of RAM, your data will probably get consumed faster, as it’ll move around buses faster and more of it will fit into constrained caches. If you need to store it in offline storage (e.g., a hard drive or a remote data cluster), it’ll move far more slowly to your machine. Try to choose appropriate data structures so all your data can fit onto one machine. We’ll use NumExpr to efficiently calculate with NumPy and Pandas with fewer data movements than the more direct method, which will save us time and make certain larger calculations feasible in a fixed amount of RAM.
+
+Counting the amount of RAM used by Python objects is surprisingly tricky. We don’t necessarily know how an object is represented behind the scenes, and if we ask the operating system for a count of bytes used, it will tell us about the total amount allocated to the process. In both cases, we can’t see exactly how each individual Python object adds to the total.
+
+As some objects and libraries don’t report their full internal allocation of bytes (or they wrap external libraries that do not report their allocation at all), this has to be a case of bestguessing. The approaches explored in this chapter can help us to decide on the best way to represent our data so we use less RAM overall.
+
+We’ll also look at several lossy methods for storing strings in scikit-learn and counts in data structures. This works a little like a JPEG compressed image—we lose some information (and we can’t undo the operation to recover it), and we gain a lot of compression as a result. By using hashes on strings, we compress the time and memory usage for a natural language processing task in scikit-learn, and we can count huge numbers of events with only a small amount of RAM.
+
+## Understanding the RAM used in a collection
+
+You may wonder if you can ask Python about the RAM that’s used by each object. Python’s sys.getsizeof(obj) call will tell us something about the memory used by an object (most but not all objects provide this). If you haven’t seen it before, be warned that it won’t give you the answer you’d expect for a container!
+
+Let’s start by looking at some primitive types. An int in Python is a variable-sized object of arbitrary size, well above the range of an 8-byte C integer. The basic object costs 24 bytes in Python 3.7 when initialized with 0. More bytes are added as you count to larger numbers:
+
+![](ScreenshotsForNotes/Chapter11/1.PNG)
+
+Behind the scenes, sets of 4 bytes are added each time the size of the number you’re counting steps above the previous limit. This affects only the memory usage; you don’t see any difference externally.
+
+We can do the same check for byte strings. An empty byte sequence costs 33 bytes, and each additional character adds 1 byte to the cost:
+
+![](ScreenshotsForNotes/Chapter11/2.PNG)
+
+This is more obvious if we use byte strings—we’d expect to see much larger costs than getsizeof is reporting:
+
+![](ScreenshotsForNotes/Chapter11/3.PNG)
+
+getsizeof reports only some of the cost, and often just for the parent object. As noted previously, it also isn’t always implemented, so it can have limited usefulness.
+
+A better tool is asizeof in pympler. This will walk a container’s hierarchy and make a best guess about the size of each object it finds, adding the sizes to a total. Be warned that it is quite slow.
+
+In addition to relying on guesses and assumptions, asizeof also cannot count memory allocated behind the scenes (such as a module that wraps a C library may not report the bytes allocated in the C library). It is best to use this as a guide. We prefer to use memit, as it gives us an accurate count of memory usage on the machine in question
+
+We can check the estimate it makes for a large list—here we’ll use 10 million integers:
+
+![](ScreenshotsForNotes/Chapter11/4.PNG)
+
+We can validate this estimate by using memit to see how the process grew. Both reports are approximate—memit takes snapshots of the RAM usage reported by the operating system while the statement is executing, and asizeof asks the objects about their size (which may not be reported correctly). We can conclude that 10 million integers in a list cost between 320 and 400 MB of RAM.
+
+Generally, the asizeof process is slower than using memit, but asizeof can be useful when you’re analyzing small objects. memit is probably more useful for real-world applications, as the actual memory usage of the process is measured rather than inferred.
+
+## Bytes versus unicode
+
+One of the (many!) advantages of Python 3.x over Python 2.x is the switch to Unicode-by-default. Previously, we had a mix of single-byte strings and multibyte Unicode objects, which could cause a headache during data import and export. In Python 3.x, all strings are Unicode by default, and if you want to deal in bytes, you’ll explicitly create a byte sequence.
+
+Unicode objects have more efficient RAM usage in Python 3.7 than in Python 2.x. In Example 11-11, we can see a 100- million-character sequence being built as a collection of bytes and as a Unicode object. The Unicode variant for common characters (here we’re assuming UTF 8 as the system’s default encoding) costs the same—a single-byte implementation is used for these common characters
+
+![](ScreenshotsForNotes/Chapter11/5.PNG)
+
+The sigma character (Σ) is more expensive—it is represented in UTF 8 as 2 bytes. We gained the flexible Unicode representation from Python 3.3 thanks to PEP 393. It works by observing the range of characters in the string and using a smaller number of bytes to represent the lower-order characters, if possible.
+
+The UTF-8 encoding of a Unicode object uses 1 byte per ASCII character and more bytes for less frequently seen characters. If you’re not sure about Unicode encodings versus Unicode objects, go and watch Net Batchelder’s “Pragmatic Unicode, or, How Do I Stop the Pain?”
+
+## Efficiently storing lots of text in RAM
+
+A common problem with text is that it occupies a lot of RAM— but if we want to test if we have seen strings before or count their frequency, having them in RAM is more convenient than paging them to and from a disk. Storing the strings naively is expensive, but tries and directed acyclic word graphs (DAWGs) can be used to compress their representation and still allow fast operations.
+
+These more advanced algorithms can save you a significant amount of RAM, which means that you might not need to expand to more servers. For production systems, the savings can be huge. In this section we’ll look at compressing a set of strings costing 1.2 GB down to 30 MB using a trie, with only a small change in performance.
+
+For this example, we’ll use a text set built from a partial dump of Wikipedia. This set contains 11 million unique tokens from a portion of the English Wikipedia and takes up 120 MB on disk.
+
+The tokens are split on whitespace from their original articles; they have variable length and contain Unicode characters and numbers. They look like this:
+
+```
+faddishness
+'melanesians'
+Kharálampos
+PizzaInACup™
+url="http://en.wikipedia.org/wiki?curid=363886"
+VIIIa),
+Superbagnères.
+```
+
+We’ll use this text sample to test how quickly we can build a data structure holding one instance of each unique word, and then we’ll see how quickly we can query for a known word (we’ll use the uncommon “Zwiebel,” from the painter Alfred Zwiebel). This lets us ask, “Have we seen Zwiebel before?” Token lookup is a common problem, and being able to do it quickly is important.
+
+When you try these containers on your own problems, be aware that you will probably see different behaviors. Each container builds its internal structures in different ways; passing in different types of token is likely to affect the build time of the structure, and different lengths of token will affect the query time. Always test in a methodical way.
+
+## Tips for using less RAM
+
+Generally, if you can avoid putting it into RAM, do. Everything you load costs you RAM. You might be able to load just a part of your data, for example, using a memory-mapped file; alternatively, you might be able to use generators to load only the part of the data that you need for partial computations rather than loading it all at once.
+
+If you are working with numeric data, you’ll almost certainly want to switch to using numpy arrays—the package offers many fast algorithms that work directly on the underlying primitive objects. The RAM savings compared to using lists of numbers can be huge, and the time savings can be similarly amazing. Furthermore, if you are dealing with very sparse arrays, using SciPy’s sparse array functionality can save incredible amounts of memory, albeit with a reduced feature set as compared to normal numpy arrays.
+
+If you’re working with strings, stick to str rather than bytes unless you have strong reasons to work at the byte level. Dealing with a myriad set of text encodings is painful by hand, and UTF-8 (or other Unicode formats) tends to make these problems disappear. If you’re storing many Unicode objects in a static structure, you probably want to investigate the DAWG and trie structures that we’ve just discussed.
+
+If you’re working with lots of bit strings, investigate numpy and the bitarray package; both have efficient representations of bits packed into bytes. You might also benefit from looking at Redis, which offers efficient storage of bit patterns. The PyPy project is experimenting with more efficient representations of homogeneous data structures, so long lists of the same primitive type (e.g., integers) might cost much less in PyPy than the equivalent structures in CPython. The MicroPython project will be interesting to anyone working with embedded systems: this tiny-memory-footprint implementation of Python is aiming for Python 3 compatibility.
+
+It goes (almost!) without saying that you know you have to benchmark when you’re trying to optimize on RAM usage, and that it pays handsomely to have a unit test suite in place before you make algorithmic changes.
+
+Having reviewed ways of compressing strings and storing numbers efficiently, we’ll now look at trading accuracy for storage space.
