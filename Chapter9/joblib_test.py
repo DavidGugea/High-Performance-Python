@@ -1,0 +1,6 @@
+from joblib import Parallel, delayed
+
+if __name__ == '__main__':
+    # ...
+    nbr_in_quarter_unit_circles = Parallel(n_jobs = nbr_parallel_blocks, verbose=1)
+    # ...
