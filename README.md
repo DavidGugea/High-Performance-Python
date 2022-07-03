@@ -2164,3 +2164,78 @@ The multiprocessing module provides a low-level interface to process- and thread
     * Allows sharing of primitive datatypes (e.g., integers, floats, and bytes) between processes after they have forked.
 * Synchronization primitives
     * Locks and semaphores to synchronize control flow between processes
+
+# 10. Clusters and Job Queues
+
+## Introduction
+
+A *cluster* is commonly recognized to be a collection of computers working togehter to solve a common task. It could be viewed from the outside as a larger single system.
+
+Before you move to a clustered solution, do make sure that you have done the following:
+
+* Profiled your system so you understand the bottlenecks
+* Exploited compiler solutions like Numba and Cython
+* Exploited multiple cores on a single machine (possibly a big machine with many cores) with Joblib or multiprocessing
+* Exploited techniques for using less RAM
+
+Keeping your system to one machine will make your life easier (even if the “one machine” is a really beefy computer with lots of RAM and many CPUs). Move to a cluster if you really need a lot of CPUs or the ability to process data from disks in parallel, or if you have production needs like high resiliency and rapid speed of response. Most research scenarios do not need resilience or scalability and are limited to few people, so the simplest solution is often the most sensible.
+
+A benefit of staying on one large machine is that a tool like Dask can quickly parallelize your Pandas or plain Python code with no networking complications. Dask can also control a cluster of machines to parallelize Pandas, NumPy, and pure Python problems. Swifter automatically parallelizes some multicore single-machine cases by piggybacking on Dask. We introduce both Dask and Swifter later in this chapter.
+
+## Benefits of Clustering
+
+The most obvious benefit of a cluster is that you can easily scale computing requirements—if you need to process more data or to get an answer faster, you just add more machines (or nodes).
+
+By adding machines, you can also improve reliability. Each machine’s components have a certain likelihood of failing, but with a good design, the failure of a number of components will not stop the operation of the cluster.
+
+Clusters are also used to create systems that scale dynamically. A common use case is to cluster a set of servers that process web requests or associated data (e.g., resizing user photos, transcoding video, or transcribing speech) and to activate more servers as demand increases at certain times of the day.
+
+Dynamic scaling is a very cost-effective way of dealing with nonuniform usage patterns, as long as the machine activation time is fast enough to deal with the speed of changing demand.
+
+Consider the effort versus the reward of building a cluster. Whilst the parallelization gains of a cluster can feel attractive, do consider the costs associated with constructing and maintaining a cluster. They fit well for long-running processes in a production environment or for well-defined and oft-repeated R&D tasks. They are less attractive for variable and short-lived R&D tasks.
+
+A subtler benefit of clustering is that clusters can be separated geographically but still centrally controlled. If one geographic area suffers an outage (due to a flood or power loss, for example), the other cluster can continue to work, perhaps with more processing units being added to handle the demand. Clusters also allow you to run heterogeneous software environments (e.g., different versions of operating systems and processing software), which might improve the robustness of the overall system—note, though, that this is definitely an expert-level topic!
+
+## Drawbacks of Clustering
+
+Moving to a clustered solution requires a change in thinking. This is an evolution of the change in thinking required when you move from serial to parallel code, as we introduced back in Chapter 9. Suddenly you have to consider what happens when you have more than one machine—you have latency between machines, you need to know if your other machines are working, and you need to keep all the machines running the same version of your software. System administration is probably your biggest challenge.
+
+In addition, you normally have to think hard about the algorithms you are implementing and what happens once you have all these additional moving parts that may need to stay in sync. This additional planning can impose a heavy mental tax; it is likely to distract you from your core task, and once a system grows large enough, you’ll probably need to add a dedicated engineer to your team.
+
+We’ve tried to focus on using one machine efficiently in this book because we believe that life is easier if you’re dealing with only one computer rather than a collection (though we confess it can be way more fun to play with a cluster—until it breaks). If you can scale vertically (by buying more RAM or more CPUs), it is worth investigating this approach in favor of clustering. Of course, your processing needs may exceed what’s possible with vertical scaling, or the robustness of a cluster may be more important than having a single machine. If you’re a single person working on this task, though, bear in mind also that running a cluster will suck up some of your time.
+
+When designing a clustered solution, you’ll need to remember that each machine’s configuration might be different (each machine will have a different load and different local data). How will you get all the right data onto the machine that’s processing your job? Does the latency involved in moving the job and the data amount to a problem? Do your jobs need to communicate partial results to one another? What happens if a process fails or a machine dies or some hardware wipes itself when several jobs are running? Failures can be introduced if you don’t consider these questions.
+
+You should also consider that failures can be acceptable. For example, you probably don’t need 99.999% reliability when you’re running a content-based web service—if on occasion a job fails (e.g., a picture doesn’t get resized quickly enough) and the user is required to reload a page, that’s something that everyone is already used to. It might not be the solution you want to give to the user, but accepting a little bit of failure typically reduces your engineering and management costs by a worthwhile margin. On the flip side, if a high-frequency trading system experiences failures, the cost of bad stock market trades could be considerable!
+
+Maintaining a fixed infrastructure can become expensive. Machines are relatively cheap to purchase, but they have an awful habit of going wrong—automatic software upgrades can glitch, network cards fail, disks have write errors, power supplies can give spikey power that disrupts data, cosmic rays can flip a bit in a RAM module. The more computers you have, the more time will be lost to dealing with these issues. Sooner or later you’ll want to bring in a system engineer who can deal with these problems, so add another $100,000 to the budget. Using a cloud-based cluster can mitigate a lot of these problems (it costs more, but you don’t have to deal with the hardware maintenance), and some cloud providers also offer a spot-priced market for cheap but temporary computing resources.
+
+An insidious problem with a cluster that grows organically over time is that it’s possible no one has documented how to restart it safely if everything gets turned off. If you don’t have a documented restart plan, you should assume you’ll have to write one at the worst possible time (one of your authors has been involved in debugging this sort of problem on Christmas Eve—this is not the Christmas present you want!). At this point you’ll also learn just how long it can take each part of a system to get up to speed—it might take minutes for each part of a cluster to boot and to start to process jobs, so if you have 10 parts that operate in succession, it might take an hour to get the whole system running from cold. The consequence is that you might have an hour’s worth of backlogged data. Do you then have the necessary capacity to deal with this backlog in a timely fashion?
+
+Slack behavior can be a cause of expensive mistakes, and complex and hard-to-anticipate behavior can cause unexpected and expensive outcomes
+
+## Common Clusters Designs
+
+It is common to start with a local ad hoc cluster of reasonably equivalent machines. You might wonder if you can add old computers to an ad hoc network, but typically older CPUs eat a lot of power and run very slowly, so they don’t contribute nearly as much as you might hope compared to one new, highspecification machine. An in-office cluster requires someone who can maintain it. A cluster on Amazon’s EC2 or Microsoft’s Azure, or one run by an academic institution, offloads the hardware support to the provider’s team.
+
+If you have well-understood processing requirements, it might make sense to design a custom cluster—perhaps one that uses an InfiniBand high-speed interconnect in place of gigabit Ethernet, or one that uses a particular configuration of RAID drives that support your read, write, or resiliency requirements. You might want to combine CPUs and GPUs on some machines, or just default to CPUs.
+
+You might want a massively decentralized processing cluster, like the ones used by projects such as SETI@home and Folding@home through the Berkeley Open Infrastructure for Network Computing (BOINC) system. They share a centralized coordination system, but the computing nodes join and leave the project in an ad hoc fashion.
+
+On top of the hardware design, you can run different software architectures. Queues of work are the most common and easiest to understand. Typically, jobs are put onto a queue and consumed by a processor. The result of the processing might go onto another queue for further processing, or it might be used as a final result (e.g., being added into a database). Message-passing systems are slightly different—messages get put onto a message bus and are then consumed by other machines. The messages might time out and get deleted, and they might be consumed by multiple machines. In a more complex system, processes talk to each other using interprocess communication—this can be considered an expert-level configuration, as there are lots of ways that you can set it up badly, which will result in you losing your sanity. Go down the IPC route only if you really know that you need it.
+
+## How to start a clustered solution
+
+The easiest way to start a clustered system is to begin with one machine that will run both the job server and a job processor (just one job processor for one CPU). If your tasks are CPUbound, run one job processor per CPU; if your tasks are I/Obound, run several per CPU. If they’re RAM-bound, be careful that you don’t run out of RAM. Get your single-machine solution working with one processor and then add more. Make your code fail in unpredictable ways (e.g., do a 1/0 in your code, use kill -9 <pid> on your worker, pull the power plug from the socket so the whole machine dies) to check if your system is robust.
+
+Obviously, you’ll want to do heavier testing than this—a unit test suite full of coding errors and artificial exceptions is good. Ian likes to throw in unexpected events, like having a processor run a set of jobs while an external process is systematically killing important processes and confirming that these all get restarted cleanly by whatever monitoring process is being used.
+
+Once you have one running job processor, add a second. Check that you’re not using too much RAM. Do you process jobs twice as fast as before?
+
+Now introduce a second machine, with just one job processor on that new machine and no job processors on the coordinating machine. Does it process jobs as fast as when you had the processor on the coordinating machine? If not, why not? Is latency a problem? Do you have different configurations? Maybe you have different machine hardware, like CPUs, RAM, and cache sizes?
+
+Now add another nine computers and test to see if you’re processing jobs 10 times faster than before. If not, why not? Are network collisions now occurring that slow down your overall processing rate?
+
+To reliably start the cluster’s components when the machine boots, we tend to use either a cron job, Circus, or supervisord. Circus and supervisord are both Pythonbased and have been around for years. cron is old but very reliable if you’re just starting scripts like a monitoring process that can start subprocesses as required.
+
+Once you have a reliable cluster, you might want to introduce a random-killer tool like Netflix’s Chaos Monkey, which deliberately kills parts of your system to test them for resiliency. Your processes and your hardware will die eventually, and it doesn’t hurt to know that you’re likely to survive at least the errors you predict might happen
