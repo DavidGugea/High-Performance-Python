@@ -2031,7 +2031,6 @@ lib = ffi.verify(r"""
 """)
 ```
 
-
 ### CPython Module
 
 Finally, we can always go right down to the CPython API level and write a CPython module. This requires us to write code in the same way that CPython is developed and take care of all of the interactions between our code and the implementation of CPython. This has the advantage that it is incredibly portable, depending on the Python version. We don’t require any external modules or libraries, just a C compiler and Python! However, this doesn’t necessarily scale well to new versions of Python. For example, CPython modules written for Python 2.7 won’t work with Python 3, and vice versa.
@@ -2041,3 +2040,62 @@ In fact, much of the slowdown in the Python 3 rollout was rooted in the difficul
 That portability comes at a big cost, though—you are responsible for every aspect of the interface between your Python code and the module. This can make even the simplest tasks take dozens of lines of code.
 
 All in all, this method should be left as a last resort. While it is quite informative to write a CPython module, the resulting code is not as reusable or maintainable as other potential methods. Making subtle changes in the module can often require completely reworking it. In fact, we include the module code and the required setup.py to compile it as a cautionary tale.
+
+# 8. Asynchronous I/O
+
+## Introduction
+
+So far we have focused on speeding up code by increasing the number of compute cycles that a program can complete in a given time. However, in the days of big data, getting the relevant data to your code can be the bottleneck, as opposed to the actual code itself. When this is the case, your program is called I/O bound; in other words, the speed is bounded by the efficiency of the input/output.
+
+I/O can be quite burdensome to the flow of a program. Every time your code reads from a file or writes to a network socket, it must pause to contact the kernel, request that the actual read happens, and then wait for it to complete. This is because it is not your program but the kernel that does the actual read operation, since the kernel is responsible for managing any interaction with hardware. The additional layer may not seem like the end of the world, especially once you realize that a similar operation happens every time memory is allocated; however we see that most of the I/O operations we perform are on devices that are orders of magnitude slower than the CPU. So even if the communication with the kernel is fast, we’ll be waiting quite some time for the kernel to get the result from the device and return it to us.
+
+For example, in the time it takes to write to a network socket, an operation that typically takes about 1 millisecond, we could have completed 2,400,000 instructions on a 2.4 GHz computer. Worst of all, our program is halted for much of this 1 millisecond of time—our execution is paused, and then we wait for a signal that the write operation has completed. This time spent in a paused state is called I/O wait.
+
+Asynchronous I/O helps us utilize this wasted time by allowing us to perform other operations while we are in the I/O wait state. For example, in Figure 8-1 we see a depiction of a program that must run three tasks, all of which have periods of I/O wait within them. If we run them serially, we suffer the I/O wait penalty three times. However, if we run these tasks concurrently, we can essentially hide the wait time by running another task in the meantime. It is important to note that this is all still happening on a single thread and still uses only one CPU at a time!
+
+This is possible because while a program is in I/O wait, the kernel is simply waiting for whatever device we’ve requested to read from (hard drive, network adapter, GPU, etc.) to send a signal that the requested data is ready. Instead of waiting, we can create a mechanism (the event loop) so that we can dispatch requests for data, continue performing compute operations, and be notified when the data is ready to be read. This is in stark contrast to the multiprocessing/multithreading (Chapter 9) paradigm, where a new process is launched that does experience I/O wait but uses the multi-tasking nature of modern CPUs to allow the main process to continue. However, the two mechanisms are often used in tandem, where we launch multiple processes, each of which is efficient at asynchronous I/O, in order to fully take advantage of our computer’s resources.
+
+Since concurrent programs run on a single thread, they are generally easier to write and manage than standard multithreaded programs. All concurrent functions share the same memory space, so sharing data between them works in the normal ways you would expect. However, you still need to be careful about race conditions since you can’t be sure which lines of code get run when.
+
+By modeling a program in this event-driven way, we are able to take advantage of I/O wait to perform more operations on a single thread than would otherwise be possible
+
+![Serial vs Concurrent Programs](ScreenshotsForNotes/Chapter8/serial_vs_concurrent_programs.PNG)
+
+## Introduction to Asynchronous Programming
+
+Typically, when a program enters I/O wait, the execution is paused so that the kernel can perform the low-level operations associated with the I/O request (this is called a context switch), and it is not resumed until the I/O operation is completed. Context switching is quite a heavy operation. It requires us to save the state of our program (losing any sort of caching we had at the CPU level) and give up the use of the CPU. Later, when we are allowed to run again, we must spend time reinitializing our program on the motherboard and getting ready to resume (of course, all this happens behind the scenes).
+
+With concurrency, on the other hand, we typically have an event loop running that manages what gets to run in our program, and when. In essence, an event loop is simply a list of functions that need to be run. The function at the top of the list gets run, then the next, etc. The following example shows a simple example of an event loop
+
+```python
+from queue import Queue
+from functools import partial
+
+eventloop = None
+
+
+class EventLoop(Queue):
+    def start(self):
+        while True:
+            function = self.get()
+            function()
+
+
+def do_hello():
+    global eventloop
+    print("Hello")
+    eventloop.put(do_world)
+
+
+def do_world():
+    global eventloop
+    print("world")
+    eventloop.put(do_hello)
+
+
+if __name__ == '__main__':
+    eventloop = EventLoop()
+    eventloop.put(do_hello)
+    eventloop.start()
+
+```
