@@ -2106,3 +2106,61 @@ Putting these two concepts together, we can have a program that, when an I/O ope
 Switching from function to function does have a cost. The kernel must take the time to set up the function to be called in memory, and the state of our caches won’t be as predictable. It is because of this that concurrency gives the best results when your program has a lot of I/O wait—the cost associated with switching can be much less than what is gained by making use of I/O wait time.
 
 Generally, programming using event loops can take two forms: callbacks or futures. In the callback paradigm, functions are called with an argument that is generally called the callback. Instead of the function returning its value, it calls the callback function with the value instead. This sets up long chains of functions that are called, with each function getting the result of the previous function in the chain (these chains are sometimes referred to as “callback hell”).
+
+# 9. The multiprocessing Module
+
+## Introduction
+
+CPython doesn’t use multiple CPUs by default. This is partly because Python was designed back in a single-core era, and partly because parallelizing can actually be quite difficult to do efficiently. Python gives us the tools to do it but leaves us to make our own choices. It is painful to see your multicore machine using just one CPU on a long-running process, though, so in this chapter we’ll review ways of using all the machine’s cores at once.
+
+We just mentioned CPython—the common implementation that we all use. Nothing in the Python language stops it from using multicore systems. CPython’s implementation cannot efficiently use multiple cores, but future implementations may not be bound by this restriction.
+
+We live in a multicore world—4 cores are common in laptops, and 32-core desktop configurations are available. If your job can be split to run on multiple CPUs without too much engineering effort, this is a wise direction to consider.
+
+When Python is used to parallelize a problem over a set of CPUs, you can expect up to an n-times (n×) speedup with n cores. If you have a quad-core machine and you can use all four cores for your task, it might run in a quarter of the original runtime. You are unlikely to see a greater than 4× speedup; in practice, you’ll probably see gains of 3–4×.
+
+Each additional process will increase the communication overhead and decrease the available RAM, so you rarely get a full n-times speedup. Depending on which problem you are solving, the communication overhead can even get so large that you can see very significant slowdowns. These sorts of problems are often where the complexity lies for any sort of parallel programming and normally require a change in algorithm. This is why parallel programming is often considered an art.
+
+If you’re not familiar with Amdahl’s law, it is worth doing some background reading. The law shows that if only a small part of your code can be parallelized, it doesn’t matter how many CPUs you throw at it; it still won’t run much faster overall. Even if a large fraction of your runtime could be parallelized, there’s a finite number of CPUs that can be used efficiently to make the overall process run faster before you get to a point of diminishing returns.
+
+The multiprocessing module lets you use process- and thread-based parallel processing, share work over queues, and share data among processes. It is mostly focused on singlemachine multicore parallelism (there are better options for multimachine parallelism). A very common use is to parallelize a task over a set of processes for a CPU-bound problem. You might also use OpenMP to parallelize an I/O-bound problem, but as we saw in Chapter 8, there are better tools for this (e.g., the new asyncio module in Python 3 and tornado).
+
+To parallelize your task, you have to think a little differently from the normal way of writing a serial process. You must also accept that debugging a parallelized task is harder—often, it can be very frustrating. We’d recommend keeping the parallelism as simple as possible (even if you’re not squeezing every last drop of power from your machine) so that your development velocity is kept high.
+
+One particularly difficult topic is the sharing of state in a parallel system—it feels like it should be easy, but it incurs lots of overhead and can be hard to get right. There are many use cases, each with different trade-offs, so there’s definitely no one solution for everyone. In “Verifying Primes Using Interprocess Communication”, we’ll go through state sharing with an eye on the synchronization costs. Avoiding shared state will make your life far easier.
+
+In fact, an algorithm can be analyzed to see how well it’ll perform in a parallel environment almost entirely by how much state must be shared. For example, if we can have multiple Python processes all solving the same problem without communicating with one another (a situation known as embarrassingly parallel), not much of a penalty will be incurred as we add more and more Python processes.
+
+On the other hand, if each process needs to communicate with every other Python process, the communication overhead will slowly overwhelm the processing and slow things down. This means that as we add more and more Python processes, we can actually slow down our overall performance.
+
+As a result, sometimes some counterintuitive algorithmic changes must be made to efficiently solve a problem in parallel. For example, when solving the diffusion equation (Chapter 6) in parallel, each process actually does some redundant work that another process also does. This redundancy reduces the amount of communication required and speeds up the overall calculation!
+
+Here are some typical jobs for the multiprocessing module:
+
+* Parallelize a CPU-bound task with Process or Pool objects
+* Parallelize an I/O-bound task in a Pool with threads using the (oddly named) dummy module
+* Share pickled work via a Queue
+* Share state between parallelized workers, including bytes, primitive datatypes, dictionaries, and lists
+
+If you come from a language where threads are used for CPUbound tasks (e.g., C++ or Java), you should know that while threads in Python are OS-native (they’re not simulated—they are actual operating system threads), they are bound by the GIL, so only one thread may interact with Python objects at a time.
+
+By using processes, we run a number of Python interpreters in parallel, each with a private memory space with its own GIL, and each runs in series (so there’s no competition for each GIL). This is the easiest way to speed up a CPU-bound task in Python
+
+## An overview of the multiprocessing module
+
+The multiprocessing module provides a low-level interface to process- and thread-based parallelism. Its main components are as follows:
+
+* Process
+    * A forked copy of the current process; this creates a new process identifier, and the task runs as an independent child process in the operating system. You can start and query the state of the Process and provide it with a target method to run.
+* Pool
+    * Wraps the Process or threading.Thread API into a convenient pool of workers that share a chunk of work and return an aggregated result.
+* Queue
+    * A FIFO queue allowing multiple producers and consumers.
+* Pipe
+    * A uni- or bidirectional communication channel between two processes.
+* Manager
+    * A high-level managed interface to share Python objects between processes.
+* ctypes
+    * Allows sharing of primitive datatypes (e.g., integers, floats, and bytes) between processes after they have forked.
+* Synchronization primitives
+    * Locks and semaphores to synchronize control flow between processes
